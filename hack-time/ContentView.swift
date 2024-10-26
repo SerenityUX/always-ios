@@ -129,6 +129,9 @@ struct ContentView: View {
         impact.impactOccurred()
     }
     
+    // Add this state variable in the ContentView struct
+    @State private var isAnnouncementModalPresented = false
+    
     init() {
         let calendar = Calendar.current
         let now = Date()
@@ -171,6 +174,17 @@ struct ContentView: View {
                     .fontWeight(.medium)
 
                 Spacer()
+
+                Button(action: {
+                    isAnnouncementModalPresented = true
+                }) {
+                    Image(systemName: "message.fill")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 32, height: 32)
+                        .foregroundColor(Color(red: 89/255, green: 99/255, blue: 110/255))
+                }
+                .padding(.trailing, 8)
 
                 AsyncImageView(url: URL(string: "https://thispersondoesnotexist.com")!)
             }
@@ -300,6 +314,12 @@ struct ContentView: View {
                 }
             }
         }
+        // Add this modifier at the end of the VStack in the body
+        .sheet(isPresented: $isAnnouncementModalPresented) {
+            AnnouncementModalView(isPresented: $isAnnouncementModalPresented)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
     }
 
     private func selectNextTag() {
@@ -396,6 +416,38 @@ extension Color {
             blue:  Double(b) / 255,
             opacity: Double(a) / 255
         )
+    }
+}
+
+// Modify the AnnouncementModalView structure
+struct AnnouncementModalView: View {
+    @Binding var isPresented: Bool
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Handle bar
+            // Title
+            Text("Announcements")
+                .font(.system(size: 24))
+                .padding()
+            
+            Divider()
+            // Content
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Announcement content goes here")
+                        .foregroundColor(Color(hue: 1.0, saturation: 0.131, brightness: 0.812, opacity: 0.0))
+                        .padding(.horizontal)
+                    
+                    
+                    // Add more content as needed
+                }
+            }
+            
+            Spacer()
+        }
+        .background(Color(UIColor.systemBackground))
+        .edgesIgnoringSafeArea(.bottom)
     }
 }
 
