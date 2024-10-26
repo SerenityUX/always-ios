@@ -106,6 +106,12 @@ struct EventView: View {
     }
 }
 
+struct TimelinePoint: Identifiable {
+    let id = UUID()
+    let date: Date
+    var yPosition: CGFloat = 0
+}
+
 struct ContentView: View {
     let startTime: Date
     let endTime: Date
@@ -131,6 +137,24 @@ struct ContentView: View {
     
     // Add this state variable in the ContentView struct
     @State private var isAnnouncementModalPresented = false
+    
+    @State private var timelinePoints: [TimelinePoint] = []
+    
+    @State private var startTimelinePoint: TimelinePoint?
+    @State private var currentTimelinePoint: TimelinePoint?
+    
+    @State private var events: [CalendarEvent] = []
+    
+    let impactMed = UIImpactFeedbackGenerator(style: .medium)
+    let impactHeavy = UIImpactFeedbackGenerator(style: .heavy)
+    let notificationFeedback = UINotificationFeedbackGenerator()
+    
+    @State private var isCreatingEvent: Bool = false
+    @State private var previewStartTime: Date?
+    @State private var previewEndTime: Date?
+    
+    // Add this property to the ContentView struct
+    @State private var lastHourFeedback: Int?
     
     init() {
         let calendar = Calendar.current
@@ -163,8 +187,6 @@ struct ContentView: View {
         ]
         _events = State(initialValue: sampleEvents)
     }
-    
-    @State private var events: [CalendarEvent] = []
     
     var body: some View {
         VStack(spacing: 0) {
@@ -233,22 +255,23 @@ struct ContentView: View {
                 ZStack(alignment: .topLeading) {
                     // Timeline
                     VStack(spacing: 0) {
-                        ForEach(hoursBetween(start: startTime, end: endTime), id: \.self) { date in
+                        ForEach(timelinePoints) { point in
                             VStack {
                                 HStack {
                                     VStack(alignment: .leading) {
-                                        if shouldShowWeekday(for: date) {
-                                            Text(formatWeekday(date: date))
+                                        if shouldShowWeekday(for: point.date) {
+                                            Text(formatWeekday(date: point.date))
                                                 .font(.system(size: 14))
                                                 .foregroundColor(Color(hue: 1.0, saturation: 0.0, brightness: 0.459))
                                                 .frame(width: 32, alignment: .leading)
                                         }
                                         
-                                        Text(formatTime(date: date))
+                                        Text(formatTime(date: point.date))
                                             .font(.system(size: 14))
                                             .foregroundColor(Color(hue: 1.0, saturation: 0.0, brightness: 0.459))
                                             .frame(width: 42, alignment: .leading)
                                     }
+                                    .padding(.leading, 12)
                                     .frame(height: 0, alignment: .leading)
                                     
                                     VStack {
@@ -272,7 +295,70 @@ struct ContentView: View {
                         }
                         .transition(.move(edge: .leading))
                     }
+                    
+                    // Event Preview
+                    if isCreatingEvent, let start = previewStartTime, let end = previewEndTime {
+                        EventPreviewView(startTime: start, endTime: end, dayStartTime: startTime)
+                            .padding(.leading, 42)
+                            .offset(y: calculateEventOffset(for: CalendarEvent(title: "", startTime: start, endTime: end, color: .clear)))
+                    }
                 }
+                .background(
+                    GeometryReader { geometry in
+                        Color.clear.contentShape(Rectangle())
+                            .gesture(
+                                LongPressGesture(minimumDuration: 0.5)
+                                    .sequenced(before: DragGesture(minimumDistance: 0))
+                                    .onChanged { value in
+                                        switch value {
+                                        case .first(true):
+                                            break
+                                        case .second(true, let drag):
+                                            if let location = drag?.location {
+                                                if self.startTimelinePoint == nil {
+                                                    self.impactHeavy.impactOccurred()
+                                                    self.startTimelinePoint = findNearestTimelinePoint(to: location.y)
+                                                    self.previewStartTime = self.startTimelinePoint?.date
+                                                    self.isCreatingEvent = true
+                                                    self.lastHourFeedback = Calendar.current.component(.hour, from: self.previewStartTime ?? Date())
+                                                }
+                                                self.currentTimelinePoint = findNearestTimelinePoint(to: location.y, roundUp: true)
+                                                self.previewEndTime = self.currentTimelinePoint?.date
+                                                
+                                                // Provide haptic feedback for each hour change (up or down)
+                                                if let endTime = self.previewEndTime,
+                                                   let lastFeedback = self.lastHourFeedback {
+                                                    let currentHour = Calendar.current.component(.hour, from: endTime)
+                                                    if currentHour != lastFeedback {
+                                                        self.impactMed.impactOccurred(intensity: 0.5)
+                                                        self.lastHourFeedback = currentHour
+                                                    }
+                                                }
+                                            }
+                                        default:
+                                            break
+                                        }
+                                    }
+                                    .onEnded { value in
+                                        if let startPoint = self.startTimelinePoint,
+                                           let endPoint = self.currentTimelinePoint {
+                                            print("Start timeline point: \(formatDate(startPoint.date))\n" +
+                                                  "Final timeline point: \(formatDate(endPoint.date))")
+                                            createCalendarEvent(start: startPoint.date, end: endPoint.date)
+                                        }
+                                        self.startTimelinePoint = nil
+                                        self.currentTimelinePoint = nil
+                                        self.isCreatingEvent = false
+                                        self.previewStartTime = nil
+                                        self.previewEndTime = nil
+                                        self.lastHourFeedback = nil
+                                    }
+                            )
+                            .simultaneousGesture(
+                                DragGesture().onChanged { _ in }
+                            )
+                    }
+                )
             }
         }
         .ignoresSafeArea(edges: .bottom)
@@ -319,6 +405,9 @@ struct ContentView: View {
             AnnouncementModalView(isPresented: $isAnnouncementModalPresented)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
+        }
+        .onAppear {
+            timelinePoints = hoursBetween(start: startTime, end: endTime)
         }
     }
 
@@ -371,16 +460,33 @@ struct ContentView: View {
         return !calendar.isDate(date, inSameDayAs: previousHour)
     }
     
-    private func hoursBetween(start: Date, end: Date) -> [Date] {
-        var dates: [Date] = []
+    private func hoursBetween(start: Date, end: Date) -> [TimelinePoint] {
+        var points: [TimelinePoint] = []
         var currentDate = start
+        var yPosition: CGFloat = 0
         
         while currentDate <= end {
-            dates.append(currentDate)
+            let point = TimelinePoint(date: currentDate, yPosition: yPosition)
+            points.append(point)
             currentDate = Calendar.current.date(byAdding: .hour, value: 1, to: currentDate)!
+            yPosition += 72.0
         }
         
-        return dates
+        return points
+    }
+    
+    private func findNearestTimelinePoint(to yPosition: CGFloat, roundUp: Bool = false) -> TimelinePoint? {
+        if roundUp {
+            return timelinePoints.first { $0.yPosition >= yPosition }
+        } else {
+            return timelinePoints.last { $0.yPosition <= yPosition }
+        }
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy h:mm a"
+        return formatter.string(from: date)
     }
     
     private func calculateEventOffset(for event: CalendarEvent) -> CGFloat {
@@ -389,6 +495,33 @@ struct ContentView: View {
         let hours = CGFloat(components.hour ?? 0)
         let minutes = CGFloat(components.minute ?? 0)
         return (hours + minutes / 60) * 72.0
+    }
+    
+    private func createCalendarEvent(start: Date, end: Date) {
+        // Check for overlaps
+        if events.contains(where: { event in
+            (start >= event.startTime && start < event.endTime) ||
+            (end > event.startTime && end <= event.endTime) ||
+            (start <= event.startTime && end >= event.endTime)
+        }) {
+            print("Cannot create event: Overlaps with existing event")
+            notificationFeedback.notificationOccurred(.error)
+            return
+        }
+        
+        // Create new CalendarEvent
+        let newEvent = CalendarEvent(
+            title: "Unnamed",
+            startTime: start,
+            endTime: end,
+            color: Color(red: 2/255, green: 147/255, blue: 212/255)
+        )
+        
+        // Add to events array
+        events.append(newEvent)
+        
+        print("Event created: \(formatDate(start)) - \(formatDate(end))")
+        impactHeavy.impactOccurred()
     }
 }
 
@@ -451,6 +584,51 @@ struct AnnouncementModalView: View {
     }
 }
 
+struct EventPreviewView: View {
+    let startTime: Date
+    let endTime: Date
+    let dayStartTime: Date
+    
+    var body: some View {
+        VStack(alignment: .leading) {
+            HStack {
+                Text("Unnamed")
+                    .foregroundColor(.white)
+                    .font(.system(size: 18))
+                Spacer()
+            }
+            Spacer()
+            
+            Text(formatEventTime(start: startTime, end: endTime))
+                .foregroundColor(.white.opacity(0.6))
+                .font(.system(size: 14))
+        }
+        .padding(16)
+        .frame(width: 320, height: calculateEventHeight())
+        .background(Color(red: 2/255, green: 147/255, blue: 212/255).opacity(0.5))
+        .cornerRadius(16)
+        .padding(.vertical, 8)
+        .padding(.leading, 16)
+    }
+    
+    private func formatEventTime(start: Date, end: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        let startString = formatter.string(from: start).lowercased()
+        let endString = formatter.string(from: end).lowercased()
+        return "\(startString) - \(endString)"
+    }
+    
+    private func calculateEventHeight() -> CGFloat {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.hour, .minute], from: startTime, to: endTime)
+        let hours = CGFloat(components.hour ?? 0)
+        let minutes = CGFloat(components.minute ?? 0)
+        return (hours + minutes / 60) * 72.0 - 16
+    }
+}
+
 #Preview {
     ContentView()
 }
+
