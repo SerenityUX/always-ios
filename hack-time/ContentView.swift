@@ -760,8 +760,8 @@ struct EventDetailModalView: View {
     
     // Add this property to generate haptic feedback
     let impactMed = UIImpactFeedbackGenerator(style: .medium)
+    let notificationFeedback = UINotificationFeedbackGenerator()
     let impactHeavy = UIImpactFeedbackGenerator(style: .heavy)
-    
     // Add this state variable for the delete confirmation alert
     @State private var showDeleteConfirmation = false
     
@@ -769,11 +769,25 @@ struct EventDetailModalView: View {
     @State private var isEditingTitle: Bool = false
     @FocusState private var isTitleFocused: Bool
     
+    @State private var isEditingStartTime: Bool = false
+    @State private var isEditingEndTime: Bool = false
+    @FocusState private var focusedField: TimeField?
+    
+    @State private var currentStartTime: Date
+    @State private var currentEndTime: Date
+    
+    enum TimeField {
+        case start
+        case end
+    }
+    
     init(event: CalendarEvent, events: Binding<[CalendarEvent]>) {
         self.event = event
         self._events = events
         self._selectedColor = State(initialValue: event.color)
         self._editableTitle = State(initialValue: event.title)
+        self._currentStartTime = State(initialValue: event.startTime)
+        self._currentEndTime = State(initialValue: event.endTime)
     }
     
     let colorOptions: [Color] = [
@@ -821,10 +835,63 @@ struct EventDetailModalView: View {
                     HStack {
                         Image(systemName: "clock.fill")
                             .foregroundColor(Color(red: 89/255, green: 99/255, blue: 110/255))
-                        Text(formatEventTime(start: event.startTime, end: event.endTime))
+                        
+                        HStack(spacing: 4) {
+                            Button(action: {
+                                isEditingStartTime = true
+                                focusedField = .start
+                            }) {
+                                Text(formatTime(date: currentStartTime))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color(UIColor.systemGray6))
+                                    .cornerRadius(6)
+                            }
+                            
+                            Text("-")
+                            
+                            Button(action: {
+                                isEditingEndTime = true
+                                focusedField = .end
+                            }) {
+                                Text(formatTime(date: currentEndTime))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color(UIColor.systemGray6))
+                                    .cornerRadius(6)
+                            }
+                        }
+                        .foregroundColor(.primary)
+                        
                         Spacer()
                     }
                     .padding(.horizontal)
+                    .sheet(isPresented: $isEditingStartTime) {
+                        TimePickerView(
+                            selectedDate: Binding(
+                                get: { currentStartTime },
+                                set: { newDate in
+                                    currentStartTime = newDate
+                                    updateEventTimes()
+                                }
+                            ),
+                            isPresented: $isEditingStartTime
+                        )
+                        .presentationDetents([.height(300)])
+                    }
+                    .sheet(isPresented: $isEditingEndTime) {
+                        TimePickerView(
+                            selectedDate: Binding(
+                                get: { currentEndTime },
+                                set: { newDate in
+                                    currentEndTime = newDate
+                                    updateEventTimes()
+                                }
+                            ),
+                            isPresented: $isEditingEndTime
+                        )
+                        .presentationDetents([.height(300)])
+                    }
                     
                     HStack {
                         Image(systemName: "calendar")
@@ -914,7 +981,7 @@ struct EventDetailModalView: View {
     private func deleteEvent() {
         if let index = events.firstIndex(where: { $0.id == event.id }) {
             events.remove(at: index)
-            impactHeavy.impactOccurred()
+            impactMed.impactOccurred()
             presentationMode.wrappedValue.dismiss()
         }
     }
@@ -928,6 +995,71 @@ struct EventDetailModalView: View {
         }
         isEditingTitle = false
         isTitleFocused = false
+    }
+    
+    private func formatTime(date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return formatter.string(from: date).lowercased()
+    }
+    
+    private func updateEventTimes() {
+        if let index = events.firstIndex(where: { $0.id == event.id }) {
+            // Check if duration is 0 or negative
+            if currentEndTime <= currentStartTime {
+                notificationFeedback.notificationOccurred(.error)
+                // Reset to previous valid times
+                currentStartTime = events[index].startTime
+                currentEndTime = events[index].endTime
+                return
+            }
+            
+            // Check for overlaps with other events
+            let wouldOverlap = events.contains { otherEvent in
+                guard otherEvent.id != event.id else { return false }
+                return (currentStartTime < otherEvent.endTime && 
+                        currentEndTime > otherEvent.startTime)
+            }
+            
+            if wouldOverlap {
+                notificationFeedback.notificationOccurred(.error)
+                // Reset to previous valid times
+                currentStartTime = events[index].startTime
+                currentEndTime = events[index].endTime
+                return
+            }
+            
+            // If we get here, the times are valid
+            var updatedEvent = events[index]
+            updatedEvent.startTime = currentStartTime
+            updatedEvent.endTime = currentEndTime
+            events[index] = updatedEvent
+            impactMed.impactOccurred(intensity: 0.5)
+        }
+    }
+}
+
+// Add this new view for the time picker
+struct TimePickerView: View {
+    @Binding var selectedDate: Date
+    @Binding var isPresented: Bool
+    
+    var body: some View {
+        NavigationView {
+            DatePicker(
+                "Select Time",
+                selection: $selectedDate,
+                displayedComponents: [.hourAndMinute]
+            )
+            .datePickerStyle(.wheel)
+            .labelsHidden()
+            .navigationBarItems(
+                trailing: Button("Done") {
+                    isPresented = false
+                }
+            )
+            .padding()
+        }
     }
 }
 
