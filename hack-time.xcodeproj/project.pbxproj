@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		4391904F2CCECBDD00BC8A27 /* background.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 4391904E2CCECBDD00BC8A27 /* background.mp4 */; };
 		43F24FCF2CCB0074007A476B /* hack_timeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43F24FCE2CCB0074007A476B /* hack_timeApp.swift */; };
 		43F24FD12CCB0074007A476B /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43F24FD02CCB0074007A476B /* ContentView.swift */; };
 		43F24FD32CCB0075007A476B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 43F24FD22CCB0075007A476B /* Assets.xcassets */; };
@@ -14,6 +15,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		4391904E2CCECBDD00BC8A27 /* background.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = background.mp4; sourceTree = "<group>"; };
 		43F24FCB2CCB0074007A476B /* hack-time.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "hack-time.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		43F24FCE2CCB0074007A476B /* hack_timeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = hack_timeApp.swift; sourceTree = "<group>"; };
 		43F24FD02CCB0074007A476B /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -35,6 +37,7 @@
 		43F24FC22CCB0074007A476B = {
 			isa = PBXGroup;
 			children = (
+				4391904E2CCECBDD00BC8A27 /* background.mp4 */,
 				43F24FCD2CCB0074007A476B /* hack-time */,
 				43F24FCC2CCB0074007A476B /* Products */,
 			);
@@ -125,6 +128,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4391904F2CCECBDD00BC8A27 /* background.mp4 in Resources */,
 				43F24FD62CCB0075007A476B /* Preview Assets.xcassets in Resources */,
 				43F24FD32CCB0075007A476B /* Assets.xcassets in Resources */,
 			);

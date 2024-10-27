@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import AVFoundation
 
 struct AsyncImageView: View {
     let url: URL
@@ -268,6 +269,9 @@ struct ContentView: View {
     // Add this state variable
     @State private var selectedEvent: CalendarEvent?
     
+    // Add this state variable
+    @State private var showProfileDropdown = false
+    
     init() {
         let calendar = Calendar.current
         let now = Date()
@@ -321,6 +325,11 @@ struct ContentView: View {
                 .padding(.trailing, 8)
 
                 AsyncImageView(url: URL(string: "https://thispersondoesnotexist.com")!)
+                    .onTapGesture {
+                        withAnimation(.spring()) {
+                            showProfileDropdown.toggle()
+                        }
+                    }
             }
             .padding()
             
@@ -531,6 +540,13 @@ struct ContentView: View {
         .onAppear {
             timelinePoints = hoursBetween(start: startTime, end: endTime)
         }
+        .overlay(
+            Group {
+                if showProfileDropdown {
+                    ProfileDropdownView(isPresented: $showProfileDropdown)
+                }
+            }
+        )
     }
 
     private func selectNextTag() {
@@ -1063,6 +1079,161 @@ struct TimePickerView: View {
     }
 }
 
+// Replace the existing ProfileDropdownView with this one
+struct ProfileDropdownView: View {
+    @Binding var isPresented: Bool
+    @State private var isShowingOnboarding = false
+    
+    var body: some View {
+        ZStack {
+            // Overlay that closes dropdown when tapped
+            if isPresented {
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation {
+                            isPresented = false
+                        }
+                    }
+            }
+            
+            // Dropdown menu
+            VStack(alignment: .leading, spacing: 0) {
+                Button(action: {
+                    print("token deleted")
+                    isShowingOnboarding = true
+                }) {
+                    HStack {
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                        Text("Logout")
+                    }
+                    .foregroundColor(.red)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                }
+            }
+            .background(Color(UIColor.systemBackground))
+            .cornerRadius(8)
+            .shadow(radius: 4)
+            .offset(x: -12, y: 60) // Adjusted offset
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        }
+        .fullScreenCover(isPresented: $isShowingOnboarding) {
+            OnboardingView()
+        }
+    }
+}
+
+struct OnboardingView: View {
+    var body: some View {
+        ZStack {
+            // Background color to verify ZStack is working
+            Color.black
+                .edgesIgnoringSafeArea(.all)
+            
+            // Background Video Layer
+            LoopingVideoPlayer(videoName: "background")
+                .edgesIgnoringSafeArea(.all)
+            
+            VStack {
+                // Content Layer with more visible text
+                Text("Build Time")
+                    .font(.system(size: 64))
+                    .foregroundColor(.white)
+                    .fontWeight(.bold)
+                    .shadow(color: Color.black.opacity(0.35), radius: 16, x: 0, y: 2)
+                Spacer()
+                VStack(spacing: 12){
+                    Button(action: {
+                        print("Login")
+                    }, label: {
+                        Text("Login")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.black)
+                            .foregroundColor(.white)
+                            .cornerRadius(16)
+                            .font(.system(size: 18))
+                            .fontWeight(.medium)
+                    })
+                    .padding(.horizontal, 16)
+                    
+                    Button(action: {
+                        print("Signup")
+                    }, label: {
+                        Text("Signup")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white)
+                            .foregroundColor(.black)
+                            .cornerRadius(16)
+                            .font(.system(size: 18))
+                            .fontWeight(.medium)
+                    })
+                    .padding(.horizontal, 16)
+                }
+            }
+        }
+    }
+}
+
+// Add this new struct for video playback
+struct LoopingVideoPlayer: UIViewRepresentable {
+    let videoName: String
+    
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        
+        // Debug: Print the bundle path
+        print("Bundle path: \(Bundle.main.bundlePath)")
+        
+        // Try to get the URL directly
+        guard let videoURL = Bundle.main.url(forResource: videoName, withExtension: "mp4") else {
+            print("❌ Could not create URL for video: \(videoName).mp4")
+            return view
+        }
+        
+        print("✅ Found video URL: \(videoURL)")
+        
+        // Create player
+        let player = AVPlayer(url: videoURL)
+        player.isMuted = true
+        
+        // Create video layer
+        let videoLayer = AVPlayerLayer(player: player)
+        videoLayer.frame = UIScreen.main.bounds
+        videoLayer.videoGravity = .resizeAspectFill
+        view.layer.addSublayer(videoLayer)
+        
+        // Debug: Print frame
+        print("Screen bounds: \(UIScreen.main.bounds)")
+        print("Video layer frame: \(videoLayer.frame)")
+        
+        // Set up looping
+        NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: player.currentItem,
+            queue: .main) { _ in
+                print("Video reached end, looping...")
+                player.seek(to: .zero)
+                player.play()
+            }
+        
+        // Start playback
+        print("Starting video playback...")
+        player.play()
+        
+        return view
+    }
+    
+    func updateUIView(_ uiView: UIView, context: Context) {
+        // Debug: Print when view updates
+        print("LoopingVideoPlayer view updated")
+    }
+}
+
 #Preview {
     ContentView()
 }
+
