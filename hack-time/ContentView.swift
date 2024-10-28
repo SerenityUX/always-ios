@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import AVFoundation
+import Foundation
 
 struct AsyncImageView: View {
     let url: URL
@@ -220,7 +221,159 @@ struct TimelinePoint: Identifiable {
     var yPosition: CGFloat = 0
 }
 
+// Add this class to handle API calls
+class AuthManager: ObservableObject {
+    @Published var isAuthenticated = false
+    @Published var error: String?
+    @Published var isLoading = false
+    
+    private let baseURL = "https://serenidad.click/hacktime"
+    
+    func login(email: String, password: String) async throws -> String {
+        let url = URL(string: "\(baseURL)/login")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body = ["email": email, "password": password]
+        request.httpBody = try JSONEncoder().encode(body)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.invalidResponse
+        }
+        
+        if httpResponse.statusCode == 401 {
+            throw AuthError.invalidCredentials
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AuthError.serverError
+        }
+        
+        let result = try JSONDecoder().decode(TokenResponse.self, from: data)
+        return result.token
+    }
+    
+    func signup(email: String, password: String, name: String) async throws -> String {
+        let url = URL(string: "\(baseURL)/signup")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body = ["email": email, "password": password, "name": name]
+        request.httpBody = try JSONEncoder().encode(body)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.invalidResponse
+        }
+        
+        if httpResponse.statusCode == 400 {
+            throw AuthError.emailInUse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AuthError.serverError
+        }
+        
+        let result = try JSONDecoder().decode(TokenResponse.self, from: data)
+        return result.token
+    }
+    
+    func validateToken(_ token: String) async throws -> User {
+        let url = URL(string: "\(baseURL)/auth")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body = ["token": token]
+        request.httpBody = try JSONEncoder().encode(body)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.invalidResponse
+        }
+        
+        if httpResponse.statusCode == 401 {
+            throw AuthError.invalidToken
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AuthError.serverError
+        }
+        
+        return try JSONDecoder().decode(User.self, from: data)
+    }
+}
+
+// Add these models and enums
+struct TokenResponse: Codable {
+    let token: String
+}
+
+struct User: Codable {
+    let email: String
+    let name: String
+    let profilePictureUrl: String?
+    let token: String
+    
+    enum CodingKeys: String, CodingKey {
+        case email, name, token
+        case profilePictureUrl = "profile_picture_url"
+    }
+}
+
+enum AuthError: Error {
+    case invalidCredentials
+    case emailInUse
+    case invalidToken
+    case invalidResponse
+    case serverError
+}
+
 struct ContentView: View {
+    @StateObject private var authManager = AuthManager()
+    
+    var body: some View {
+        Group {
+            if authManager.isAuthenticated {
+                MainContentView()
+            } else {
+                OnboardingView()
+            }
+        }
+        .onAppear {
+            checkAuth()
+        }
+    }
+    
+    private func checkAuth() {
+        guard let token = UserDefaults.standard.string(forKey: "authToken") else {
+            authManager.isAuthenticated = false
+            return
+        }
+        
+        Task {
+            do {
+                _ = try await authManager.validateToken(token)
+                await MainActor.run {
+                    authManager.isAuthenticated = true
+                }
+            } catch {
+                await MainActor.run {
+                    authManager.isAuthenticated = false
+                    UserDefaults.standard.removeObject(forKey: "authToken")
+                }
+            }
+        }
+    }
+}
+
+struct MainContentView: View {
     let startTime: Date
     let endTime: Date
     
@@ -704,9 +857,22 @@ struct AnnouncementModalView: View {
                 .padding()
             
             Divider()
+            
             // Content
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    VStack(spacing: 8) {
+                        HStack(spacing: 16){
+                            AsyncImageView(url: URL(string: "https://thispersondoesnotexist.com")!)                            
+                            Text("Alex")
+                            Text("12:23 PM")
+                                .opacity(0.5)
+                            Spacer()
+                        }
+                        Text("Hey everyone, we are pushing the dinner to 5PM because several flights have been delayed a couple of hours and transportation is taking longer than expected")
+                            .opacity(0.8)
+                    }
+                    .padding()
                     Text("Announcement content goes here")
                         .foregroundColor(Color(hue: 1.0, saturation: 0.131, brightness: 0.812, opacity: 0.0))
                         .padding(.horizontal)
@@ -1125,54 +1291,381 @@ struct ProfileDropdownView: View {
 }
 
 struct OnboardingView: View {
+    @State private var showLogin = false
+    @State private var showSignup = false
+    
     var body: some View {
-        ZStack {
-            // Background color to verify ZStack is working
-            Color.black
-                .edgesIgnoringSafeArea(.all)
-            
-            // Background Video Layer
-            LoopingVideoPlayer(videoName: "background")
-                .edgesIgnoringSafeArea(.all)
-            
-            VStack {
-                // Content Layer with more visible text
-                Text("Build Time")
-                    .font(.system(size: 64))
-                    .foregroundColor(.white)
-                    .fontWeight(.bold)
-                    .shadow(color: Color.black.opacity(0.35), radius: 16, x: 0, y: 2)
-                Spacer()
-                VStack(spacing: 12){
-                    Button(action: {
-                        print("Login")
-                    }, label: {
-                        Text("Login")
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(Color.black)
-                            .foregroundColor(.white)
-                            .cornerRadius(16)
-                            .font(.system(size: 18))
-                            .fontWeight(.medium)
-                    })
-                    .padding(.horizontal, 16)
-                    
-                    Button(action: {
-                        print("Signup")
-                    }, label: {
-                        Text("Signup")
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(Color.white)
-                            .foregroundColor(.black)
-                            .cornerRadius(16)
-                            .font(.system(size: 18))
-                            .fontWeight(.medium)
-                    })
-                    .padding(.horizontal, 16)
+        NavigationStack {
+            ZStack {
+                Color.black
+                    .edgesIgnoringSafeArea(.all)
+                
+                LoopingVideoPlayer(videoName: "background")
+                    .edgesIgnoringSafeArea(.all)
+                
+                VStack {
+                    Text("Build Time")
+                        .font(.system(size: 64))
+                        .foregroundColor(.white)
+                        .fontWeight(.bold)
+                        .shadow(color: Color.black.opacity(0.35), radius: 16, x: 0, y: 2)
+                    Spacer()
+                    VStack(spacing: 12){
+                        Button(action: {
+                            showLogin = true
+                        }, label: {
+                            Text("Login")
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(Color.black)
+                                .foregroundColor(.white)
+                                .cornerRadius(16)
+                                .font(.system(size: 18))
+                                .fontWeight(.medium)
+                        })
+                        .padding(.horizontal, 16)
+                        
+                        Button(action: {
+                            showSignup = true
+                        }, label: {
+                            Text("Signup")
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(Color.white)
+                                .foregroundColor(.black)
+                                .cornerRadius(16)
+                                .font(.system(size: 18))
+                                .fontWeight(.medium)
+                        })
+                        .padding(.horizontal, 16)
+                    }
+                }
+                .navigationDestination(isPresented: $showLogin) {
+                    LoginView()
+                }
+                .navigationDestination(isPresented: $showSignup) {
+                    SignupView()
                 }
             }
+        }
+    }
+}
+
+struct LoginView: View {
+    @Environment(\.dismiss) var dismiss
+    @State private var email: String = ""
+    @State private var password: String = ""
+    @State private var showPassword: Bool = false
+    @State private var errorMessage: String?
+    @State private var isLoading = false
+    
+    @FocusState private var focusedField: LoginField?
+    
+    enum LoginField {
+        case email
+        case password
+    }
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                Text("Welcome Back")
+                    .font(.title)
+                    .fontWeight(.bold)
+                    .padding(.top, 32)
+                
+                VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Email")
+                            .foregroundColor(.gray)
+                        TextField("Enter your email", text: $email)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .textContentType(.emailAddress)
+                            .keyboardType(.emailAddress)
+                            .autocapitalization(.none)
+                            .focused($focusedField, equals: .email)
+                            .submitLabel(.next)
+                            .onSubmit {
+                                focusedField = .password
+                            }
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Password")
+                            .foregroundColor(.gray)
+                        HStack {
+                            if showPassword {
+                                TextField("Enter your password", text: $password)
+                                    .textContentType(.password)
+                                    .submitLabel(.done)
+                            } else {
+                                SecureField("Enter your password", text: $password)
+                                    .textContentType(.password)
+                                    .submitLabel(.done)
+                            }
+                            
+                            Button(action: {
+                                showPassword.toggle()
+                            }) {
+                                Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
+                                    .foregroundColor(.gray)
+                            }
+                        }
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .focused($focusedField, equals: .password)
+                        .onSubmit {
+                            handleLogin()
+                        }
+                    }
+                }
+                .padding(.horizontal, 24)
+                
+                if let error = errorMessage {
+                    Text(error)
+                        .foregroundColor(.red)
+                        .padding(.horizontal)
+                }
+                
+                Button(action: handleLogin) {
+                    if isLoading {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Text("Login")
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(Color.black)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+                .padding(.horizontal, 24)
+                .disabled(isLoading)
+                
+                Button(action: {
+                    // Handle forgot password
+                    print("Forgot password tapped")
+                }) {
+                    Text("Forgot Password?")
+                        .foregroundColor(.gray)
+                }
+                
+                Spacer()
+            }
+        }
+        .onAppear {
+            // Delay focus slightly to ensure view is fully loaded
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                focusedField = .email
+            }
+        }
+    }
+    
+    private func handleLogin() {
+        guard !email.isEmpty && !password.isEmpty else {
+            errorMessage = "Please fill in all fields"
+            return
+        }
+        
+        isLoading = true
+        errorMessage = nil
+        
+        Task {
+            do {
+                let authManager = AuthManager()
+                let token = try await authManager.login(email: email, password: password)
+                UserDefaults.standard.set(token, forKey: "authToken")
+                dismiss()
+            } catch AuthError.invalidCredentials {
+                errorMessage = "Invalid email or password"
+            } catch {
+                errorMessage = "An error occurred. Please try again."
+            }
+            isLoading = false
+        }
+    }
+}
+
+struct SignupView: View {
+    @Environment(\.dismiss) var dismiss
+    @State private var email: String = ""
+    @State private var password: String = ""
+    @State private var name: String = ""
+    @State private var confirmPassword: String = ""
+    @State private var showPassword: Bool = false
+    @State private var showConfirmPassword: Bool = false
+    @State private var errorMessage: String?
+    @State private var isLoading = false
+    
+    @FocusState private var focusedField: SignupField?
+    
+    enum SignupField {
+        case name
+        case email
+        case password
+        case confirmPassword
+    }
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                Text("Create Account")
+                    .font(.title)
+                    .fontWeight(.bold)
+                    .padding(.top, 32)
+                
+                VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Email")
+                            .foregroundColor(.gray)
+                        TextField("Enter your email", text: $email)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .textContentType(.emailAddress)
+                            .keyboardType(.emailAddress)
+                            .autocapitalization(.none)
+                            .focused($focusedField, equals: .email)
+                            .submitLabel(.next)
+                            .onSubmit {
+                                focusedField = .password
+                            }
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Password")
+                            .foregroundColor(.gray)
+                        HStack {
+                            if showPassword {
+                                TextField("Enter your password", text: $password)
+                                    .textContentType(.password)
+                            } else {
+                                SecureField("Enter your password", text: $password)
+                                    .textContentType(.password)
+                            }
+                            
+                            Button(action: {
+                                showPassword.toggle()
+                            }) {
+                                Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
+                                    .foregroundColor(.gray)
+                            }
+                        }
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .focused($focusedField, equals: .password)
+                        .submitLabel(.next)
+                        .onSubmit {
+                            focusedField = .confirmPassword
+                        }
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Confirm Password")
+                            .foregroundColor(.gray)
+                        HStack {
+                            if showConfirmPassword {
+                                TextField("Confirm your password", text: $confirmPassword)
+                                    .textContentType(.password)
+                            } else {
+                                SecureField("Confirm your password", text: $confirmPassword)
+                                    .textContentType(.password)
+                            }
+                            
+                            Button(action: {
+                                showConfirmPassword.toggle()
+                            }) {
+                                Image(systemName: showConfirmPassword ? "eye.slash.fill" : "eye.fill")
+                                    .foregroundColor(.gray)
+                            }
+                        }
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .focused($focusedField, equals: .confirmPassword)
+                        .submitLabel(.join)
+                        .onSubmit {
+                            handleSignup()
+                        }
+                    }
+                }
+                .padding(.horizontal, 24)
+                
+                // Add name field
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Name")
+                        .foregroundColor(.gray)
+                    TextField("Enter your name", text: $name)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .focused($focusedField, equals: .name)
+                        .submitLabel(.next)
+                        .onSubmit {
+                            focusedField = .email
+                        }
+                }
+                
+                if let error = errorMessage {
+                    Text(error)
+                        .foregroundColor(.red)
+                        .padding(.horizontal)
+                }
+                
+                Button(action: handleSignup) {
+                    if isLoading {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Text("Sign Up")
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(Color.black)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+                .padding(.horizontal, 24)
+                .disabled(isLoading)
+                
+                Button(action: {
+                    // Handle forgot password
+                    print("Forgot password tapped")
+                }) {
+                    Text("Forgot Password?")
+                        .foregroundColor(.gray)
+                }
+                
+                Spacer()
+            }
+        }
+        .onAppear {
+            // Delay focus slightly to ensure view is fully loaded
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                focusedField = .email
+            }
+        }
+    }
+    
+    private func handleSignup() {
+        guard !email.isEmpty && !password.isEmpty && !name.isEmpty else {
+            errorMessage = "Please fill in all fields"
+            return
+        }
+        
+        guard password == confirmPassword else {
+            errorMessage = "Passwords don't match"
+            return
+        }
+        
+        isLoading = true
+        errorMessage = nil
+        
+        Task {
+            do {
+                let authManager = AuthManager()
+                let token = try await authManager.signup(email: email, password: password, name: name)
+                UserDefaults.standard.set(token, forKey: "authToken")
+                dismiss()
+            } catch AuthError.emailInUse {
+                errorMessage = "Email is already in use"
+            } catch {
+                errorMessage = "An error occurred. Please try again."
+            }
+            isLoading = false
         }
     }
 }
@@ -1190,11 +1683,10 @@ struct LoopingVideoPlayer: UIViewRepresentable {
         
         // Try to get the URL directly
         guard let videoURL = Bundle.main.url(forResource: videoName, withExtension: "mp4") else {
-            print("❌ Could not create URL for video: \(videoName).mp4")
+            print("Could not create URL for video: \(videoName).mp4")
             return view
         }
         
-        print("✅ Found video URL: \(videoURL)")
         
         // Create player
         let player = AVPlayer(url: videoURL)
@@ -1235,5 +1727,7 @@ struct LoopingVideoPlayer: UIViewRepresentable {
 
 #Preview {
     ContentView()
+        .preferredColorScheme(.light)  // Add this line
+
 }
 

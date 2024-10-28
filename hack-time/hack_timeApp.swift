@@ -12,6 +12,8 @@ struct hack_timeApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .preferredColorScheme(.light)  // Add this line
+
         }
     }
 }
