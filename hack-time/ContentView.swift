@@ -308,6 +308,50 @@ class AuthManager: ObservableObject {
         
         return try JSONDecoder().decode(User.self, from: data)
     }
+    
+    func requestPasswordReset(email: String) async throws {
+        let url = URL(string: "\(baseURL)/forgotPasswordRequest")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body = ["email": email]
+        request.httpBody = try JSONEncoder().encode(body)
+        
+        let (_, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AuthError.serverError
+        }
+    }
+    
+    func changePassword(email: String, oneTimeCode: String, newPassword: String) async throws {
+        let url = URL(string: "\(baseURL)/changePassword")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body = ["email": email, "oneTimeCode": oneTimeCode, "newPassword": newPassword]
+        request.httpBody = try JSONEncoder().encode(body)
+        
+        let (_, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.invalidResponse
+        }
+        
+        if httpResponse.statusCode == 400 {
+            throw AuthError.invalidCode
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AuthError.serverError
+        }
+    }
 }
 
 // Add these models and enums
@@ -333,8 +377,10 @@ enum AuthError: Error {
     case invalidToken
     case invalidResponse
     case serverError
+    case invalidCode
 }
 
+// Update ContentView to include environment object
 struct ContentView: View {
     @StateObject private var authManager = AuthManager()
     
@@ -346,6 +392,7 @@ struct ContentView: View {
                 OnboardingView()
             }
         }
+        .environmentObject(authManager) // Add this line to pass authManager down
         .onAppear {
             checkAuth()
         }
@@ -425,6 +472,9 @@ struct MainContentView: View {
     // Add this state variable
     @State private var showProfileDropdown = false
     
+    // Add this property
+    @State private var user: User?
+    
     init() {
         let calendar = Calendar.current
         let now = Date()
@@ -477,12 +527,14 @@ struct MainContentView: View {
                 }
                 .padding(.trailing, 8)
 
-                AsyncImageView(url: URL(string: "https://thispersondoesnotexist.com")!)
-                    .onTapGesture {
-                        withAnimation(.spring()) {
-                            showProfileDropdown.toggle()
+                if let user = user {
+                    ProfileImageView(user: user)
+                        .onTapGesture {
+                            withAnimation(.spring()) {
+                                showProfileDropdown.toggle()
+                            }
                         }
-                    }
+                }
             }
             .padding()
             
@@ -700,6 +752,9 @@ struct MainContentView: View {
                 }
             }
         )
+        .task {
+            await loadUserData()
+        }
     }
 
     private func selectNextTag() {
@@ -814,6 +869,20 @@ struct MainContentView: View {
         
         print("Event created: \(formatDate(start)) - \(formatDate(end))")
         impactHeavy.impactOccurred()
+    }
+
+    private func loadUserData() async {
+        if let token = UserDefaults.standard.string(forKey: "authToken") {
+            do {
+                let authManager = AuthManager()
+                let userData = try await authManager.validateToken(token)
+                await MainActor.run {
+                    self.user = userData
+                }
+            } catch {
+                print("Error loading user data:", error)
+            }
+        }
     }
 }
 
@@ -988,11 +1057,11 @@ struct EventDetailModalView: View {
                     TextField("Event Title", text: $editableTitle)
                         .font(.system(size: 24))
                         .focused($isTitleFocused)
-                        .onSubmit {
+                            .onSubmit {
                             updateEventTitle()
                         }
                         .submitLabel(.done)
-                } else {
+                            } else {
                     Text(editableTitle)
                         .font(.system(size: 24))
                         .onTapGesture {
@@ -1001,7 +1070,7 @@ struct EventDetailModalView: View {
                         }
                 }
                 Spacer()
-                Button(action: {
+                            Button(action: {
                     showDeleteConfirmation = true
                 }) {
                     Image(systemName: "trash")
@@ -1014,7 +1083,7 @@ struct EventDetailModalView: View {
             
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    HStack {
+                        HStack {
                         Image(systemName: "clock.fill")
                             .foregroundColor(Color(red: 89/255, green: 99/255, blue: 110/255))
                         
@@ -1117,10 +1186,10 @@ struct EventDetailModalView: View {
                     // Add more event details as needed
                 }
                 .padding(.vertical)
+                }
+                
+                Spacer()
             }
-            
-            Spacer()
-        }
         .background(Color(UIColor.systemBackground))
         .edgesIgnoringSafeArea(.bottom)
         .alert(isPresented: $showDeleteConfirmation) {
@@ -1245,10 +1314,10 @@ struct TimePickerView: View {
     }
 }
 
-// Replace the existing ProfileDropdownView with this one
+// Update ProfileDropdownView to handle logout
 struct ProfileDropdownView: View {
     @Binding var isPresented: Bool
-    @State private var isShowingOnboarding = false
+    @EnvironmentObject var authManager: AuthManager // Add this line
     
     var body: some View {
         ZStack {
@@ -1266,8 +1335,9 @@ struct ProfileDropdownView: View {
             // Dropdown menu
             VStack(alignment: .leading, spacing: 0) {
                 Button(action: {
-                    print("token deleted")
-                    isShowingOnboarding = true
+                    UserDefaults.standard.removeObject(forKey: "authToken")
+                    authManager.isAuthenticated = false // Add this line
+                    isPresented = false
                 }) {
                     HStack {
                         Image(systemName: "rectangle.portrait.and.arrow.right")
@@ -1283,9 +1353,6 @@ struct ProfileDropdownView: View {
             .shadow(radius: 4)
             .offset(x: -12, y: 60) // Adjusted offset
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        }
-        .fullScreenCover(isPresented: $isShowingOnboarding) {
-            OnboardingView()
         }
     }
 }
@@ -1351,13 +1418,17 @@ struct OnboardingView: View {
     }
 }
 
+// Update LoginView to use the environment object
 struct LoginView: View {
     @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var authManager: AuthManager // Add this line
+    
     @State private var email: String = ""
     @State private var password: String = ""
     @State private var showPassword: Bool = false
     @State private var errorMessage: String?
     @State private var isLoading = false
+    @State private var showForgotPassword = false
     
     @FocusState private var focusedField: LoginField?
     
@@ -1384,41 +1455,41 @@ struct LoginView: View {
                             .keyboardType(.emailAddress)
                             .autocapitalization(.none)
                             .focused($focusedField, equals: .email)
-                            .submitLabel(.next)
-                            .onSubmit {
-                                focusedField = .password
-                            }
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 8) {
+                                .submitLabel(.next)
+                                .onSubmit {
+                                    focusedField = .password
+                                }
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 8) {
                         Text("Password")
-                            .foregroundColor(.gray)
-                        HStack {
-                            if showPassword {
+                                .foregroundColor(.gray)
+                            HStack {
+                                if showPassword {
                                 TextField("Enter your password", text: $password)
                                     .textContentType(.password)
                                     .submitLabel(.done)
-                            } else {
+                                } else {
                                 SecureField("Enter your password", text: $password)
                                     .textContentType(.password)
                                     .submitLabel(.done)
+                                }
+                                
+                                Button(action: {
+                                    showPassword.toggle()
+                                }) {
+                                    Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
+                                        .foregroundColor(.gray)
+                                }
                             }
-                            
-                            Button(action: {
-                                showPassword.toggle()
-                            }) {
-                                Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
-                                    .foregroundColor(.gray)
-                            }
-                        }
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .focused($focusedField, equals: .password)
-                        .onSubmit {
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .focused($focusedField, equals: .password)
+                            .onSubmit {
                             handleLogin()
+                                }
                         }
                     }
-                }
-                .padding(.horizontal, 24)
+                    .padding(.horizontal, 24)
                 
                 if let error = errorMessage {
                     Text(error)
@@ -1443,8 +1514,7 @@ struct LoginView: View {
                 .disabled(isLoading)
                 
                 Button(action: {
-                    // Handle forgot password
-                    print("Forgot password tapped")
+                    showForgotPassword = true
                 }) {
                     Text("Forgot Password?")
                         .foregroundColor(.gray)
@@ -1456,8 +1526,11 @@ struct LoginView: View {
         .onAppear {
             // Delay focus slightly to ensure view is fully loaded
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                focusedField = .email
-            }
+            focusedField = .email
+        }
+    }
+        .sheet(isPresented: $showForgotPassword) {
+            ForgotPasswordView()
         }
     }
     
@@ -1472,10 +1545,12 @@ struct LoginView: View {
         
         Task {
             do {
-                let authManager = AuthManager()
                 let token = try await authManager.login(email: email, password: password)
-                UserDefaults.standard.set(token, forKey: "authToken")
-                dismiss()
+                await MainActor.run {
+                    UserDefaults.standard.set(token, forKey: "authToken")
+                    authManager.isAuthenticated = true // Add this line
+                    dismiss()
+                }
             } catch AuthError.invalidCredentials {
                 errorMessage = "Invalid email or password"
             } catch {
@@ -1486,8 +1561,11 @@ struct LoginView: View {
     }
 }
 
+// Update SignupView to use the environment object
 struct SignupView: View {
     @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var authManager: AuthManager // Add this line
+    
     @State private var email: String = ""
     @State private var password: String = ""
     @State private var name: String = ""
@@ -1514,7 +1592,22 @@ struct SignupView: View {
                     .fontWeight(.bold)
                     .padding(.top, 32)
                 
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Name")
+                        .foregroundColor(.gray)
+                    TextField("Enter your name", text: $name)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .focused($focusedField, equals: .name)
+                        .submitLabel(.next)
+                        .onSubmit {
+                            focusedField = .email
+                        }
+                }
+                .padding(.horizontal, 24)
+
+                
                 VStack(alignment: .leading, spacing: 20) {
+                    // Add name field
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Email")
                             .foregroundColor(.gray)
@@ -1585,19 +1678,7 @@ struct SignupView: View {
                     }
                 }
                 .padding(.horizontal, 24)
-                
-                // Add name field
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Name")
-                        .foregroundColor(.gray)
-                    TextField("Enter your name", text: $name)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .focused($focusedField, equals: .name)
-                        .submitLabel(.next)
-                        .onSubmit {
-                            focusedField = .email
-                        }
-                }
+
                 
                 if let error = errorMessage {
                     Text(error)
@@ -1656,10 +1737,12 @@ struct SignupView: View {
         
         Task {
             do {
-                let authManager = AuthManager()
                 let token = try await authManager.signup(email: email, password: password, name: name)
-                UserDefaults.standard.set(token, forKey: "authToken")
-                dismiss()
+                await MainActor.run {
+                    UserDefaults.standard.set(token, forKey: "authToken")
+                    authManager.isAuthenticated = true // Add this line
+                    dismiss()
+                }
             } catch AuthError.emailInUse {
                 errorMessage = "Email is already in use"
             } catch {
@@ -1725,9 +1808,236 @@ struct LoopingVideoPlayer: UIViewRepresentable {
     }
 }
 
+struct ForgotPasswordView: View {
+    @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var authManager: AuthManager
+    
+    @State private var email: String = ""
+    @State private var oneTimeCode: String = ""
+    @State private var newPassword: String = ""
+    @State private var confirmPassword: String = ""
+    @State private var showPassword: Bool = false
+    @State private var errorMessage: String?
+    @State private var isLoading = false
+    @State private var codeSent = false
+    
+    @FocusState private var focusedField: Field?
+    
+    enum Field {
+        case email
+        case code
+        case password
+        case confirmPassword
+    }
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                Text(codeSent ? "Reset Password" : "Forgot Password")
+                    .font(.title)
+                    .fontWeight(.bold)
+                    .padding(.top, 32)
+                
+                if !codeSent {
+                    // Email input view
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Email")
+                            .foregroundColor(.gray)
+                        TextField("Enter your email", text: $email)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .textContentType(.emailAddress)
+                            .keyboardType(.emailAddress)
+                            .autocapitalization(.none)
+                            .focused($focusedField, equals: .email)
+                            .submitLabel(.done)
+                    }
+                    .padding(.horizontal, 24)
+                } else {
+                    // Code and new password view
+                    VStack(spacing: 20) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Code")
+                                .foregroundColor(.gray)
+                            TextField("Enter the code sent to your email", text: $oneTimeCode)
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                                .keyboardType(.numberPad)
+                                .focused($focusedField, equals: .code)
+                                .submitLabel(.next)
+                                .onSubmit {
+                                    focusedField = .password
+                                }
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("New Password")
+                                .foregroundColor(.gray)
+                            HStack {
+                                if showPassword {
+                                    TextField("Enter new password", text: $newPassword)
+                                } else {
+                                    SecureField("Enter new password", text: $newPassword)
+                                }
+                                
+                                Button(action: {
+                                    showPassword.toggle()
+                                }) {
+                                    Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
+                                        .foregroundColor(.gray)
+                                }
+                            }
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .focused($focusedField, equals: .password)
+                            .submitLabel(.next)
+                            .onSubmit {
+                                focusedField = .confirmPassword
+                            }
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Confirm Password")
+                                .foregroundColor(.gray)
+                            HStack {
+                                if showPassword {
+                                    TextField("Confirm new password", text: $confirmPassword)
+                                } else {
+                                    SecureField("Confirm new password", text: $confirmPassword)
+                                }
+                                
+                                Button(action: {
+                                    showPassword.toggle()
+                                }) {
+                                    Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
+                                        .foregroundColor(.gray)
+                                }
+                            }
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .focused($focusedField, equals: .confirmPassword)
+                            .submitLabel(.done)
+                            .onSubmit {
+                                handlePasswordReset()
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 24)
+                }
+                
+                if let error = errorMessage {
+                    Text(error)
+                        .foregroundColor(.red)
+                        .padding(.horizontal)
+                }
+                
+                Button(action: codeSent ? handlePasswordReset : handleCodeRequest) {
+                    if isLoading {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Text(codeSent ? "Reset Password" : "Send Code")
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(Color.black)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+                .padding(.horizontal, 24)
+                .disabled(isLoading)
+                
+                Spacer()
+            }
+            .navigationBarItems(leading: Button("Cancel") {
+                dismiss()
+            })
+        }
+        .onAppear {
+            focusedField = .email
+        }
+    }
+    
+    private func handleCodeRequest() {
+        guard !email.isEmpty else {
+            errorMessage = "Please enter your email"
+            return
+        }
+        
+        isLoading = true
+        errorMessage = nil
+        
+        Task {
+            do {
+                try await authManager.requestPasswordReset(email: email)
+                await MainActor.run {
+                    codeSent = true
+                    focusedField = .code
+                }
+            } catch {
+                errorMessage = "An error occurred. Please try again."
+            }
+            isLoading = false
+        }
+    }
+    
+    private func handlePasswordReset() {
+        guard !oneTimeCode.isEmpty else {
+            errorMessage = "Please enter the code"
+            return
+        }
+        
+        guard !newPassword.isEmpty else {
+            errorMessage = "Please enter a new password"
+            return
+        }
+        
+        guard newPassword == confirmPassword else {
+            errorMessage = "Passwords don't match"
+            return
+        }
+        
+        isLoading = true
+        errorMessage = nil
+        
+        Task {
+            do {
+                try await authManager.changePassword(email: email, oneTimeCode: oneTimeCode, newPassword: newPassword)
+                await MainActor.run {
+                    dismiss()
+                }
+            } catch AuthError.invalidCode {
+                errorMessage = "Invalid code"
+            } catch {
+                errorMessage = "An error occurred. Please try again."
+            }
+            isLoading = false
+        }
+    }
+}
+
+struct ProfileImageView: View {
+    let user: User
+    let size: CGFloat = 44
+    
+    var body: some View {
+        Group {
+            if let profileUrl = user.profilePictureUrl,
+               let url = URL(string: profileUrl) {
+                AsyncImageView(url: url)
+            } else {
+                // Fallback to circle with initial
+                Circle()
+                    .fill(Color(red: 220/255, green: 220/255, blue: 220/255)) // Lighter grey background
+                    .frame(width: size, height: size)
+                    .overlay(
+                        Text(String(user.name.prefix(1)).uppercased())
+                            .foregroundColor(Color(red: 180/255, green: 180/255, blue: 180/255)) // Lighter grey text
+                            .font(.system(size: size * 0.5, weight: .regular)) // Regular and uppercase text
+                    )
+            }
+        }
+    }
+}
+
 #Preview {
     ContentView()
         .preferredColorScheme(.light)  // Add this line
 
 }
-
