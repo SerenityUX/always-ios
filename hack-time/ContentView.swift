@@ -226,9 +226,49 @@ class AuthManager: ObservableObject {
     @Published var isAuthenticated = false
     @Published var error: String?
     @Published var isLoading = false
-    
+    @Published var currentUser: User?  // Add this line
+
     private let baseURL = "https://serenidad.click/hacktime"
     
+
+    func uploadProfilePicture(imageData: Data, token: String) async throws -> String {
+        let url = URL(string: "\(baseURL)/changeProfilePicture")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        
+        let boundary = UUID().uuidString
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        
+        var body = Data()
+        // Add token
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"token\"\r\n\r\n".data(using: .utf8)!)
+        body.append("\(token)\r\n".data(using: .utf8)!)
+        
+        // Add image data
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"profilePicture\"; filename=\"profile.jpg\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append(imageData)
+        body.append("\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        
+        request.httpBody = body
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AuthError.serverError
+        }
+        
+        let result = try JSONDecoder().decode(ProfilePictureResponse.self, from: data)
+        return result.profilePictureUrl
+    }
+
     func login(email: String, password: String) async throws -> String {
         let url = URL(string: "\(baseURL)/login")!
         var request = URLRequest(url: url)
@@ -306,7 +346,11 @@ class AuthManager: ObservableObject {
             throw AuthError.serverError
         }
         
-        return try JSONDecoder().decode(User.self, from: data)
+        let user = try JSONDecoder().decode(User.self, from: data)
+        await MainActor.run {
+            self.currentUser = user  // Store the user
+        }
+        return user
     }
     
     func requestPasswordReset(email: String) async throws {
@@ -362,7 +406,7 @@ struct TokenResponse: Codable {
 struct User: Codable {
     let email: String
     let name: String
-    let profilePictureUrl: String?
+    var profilePictureUrl: String?
     let token: String
     
     enum CodingKeys: String, CodingKey {
@@ -475,6 +519,10 @@ struct MainContentView: View {
     // Add this property
     @State private var user: User?
     
+    @EnvironmentObject var authManager: AuthManager
+    
+    @StateObject private var userState = UserState()
+    
     init() {
         let calendar = Calendar.current
         let now = Date()
@@ -527,7 +575,7 @@ struct MainContentView: View {
                 }
                 .padding(.trailing, 8)
 
-                if let user = user {
+                if let user = userState.user {
                     ProfileImageView(user: user)
                         .onTapGesture {
                             withAnimation(.spring()) {
@@ -748,12 +796,15 @@ struct MainContentView: View {
         .overlay(
             Group {
                 if showProfileDropdown {
-                    ProfileDropdownView(isPresented: $showProfileDropdown)
+                    ProfileDropdownView(
+                        isPresented: $showProfileDropdown,
+                        userState: userState
+                    )
                 }
             }
         )
         .task {
-            await loadUserData()
+            loadUserData()
         }
     }
 
@@ -871,16 +922,17 @@ struct MainContentView: View {
         impactHeavy.impactOccurred()
     }
 
-    private func loadUserData() async {
-        if let token = UserDefaults.standard.string(forKey: "authToken") {
+    private func loadUserData() {
+        guard let token = UserDefaults.standard.string(forKey: "authToken") else { return }
+        
+        Task {
             do {
-                let authManager = AuthManager()
                 let userData = try await authManager.validateToken(token)
                 await MainActor.run {
-                    self.user = userData
+                    userState.user = userData
                 }
             } catch {
-                print("Error loading user data:", error)
+                print("Failed to load user data:", error)
             }
         }
     }
@@ -1314,45 +1366,49 @@ struct TimePickerView: View {
     }
 }
 
-// Update ProfileDropdownView to handle logout
-struct ProfileDropdownView: View {
-    @Binding var isPresented: Bool
-    @EnvironmentObject var authManager: AuthManager // Add this line
+// Add this helper struct for image picking
+struct ImagePicker: UIViewControllerRepresentable {
+    let completion: (UIImage?) -> Void
+    let allowsEditing: Bool
     
-    var body: some View {
-        ZStack {
-            // Overlay that closes dropdown when tapped
-            if isPresented {
-                Color.black.opacity(0.001)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        withAnimation {
-                            isPresented = false
-                        }
-                    }
-            }
-            
-            // Dropdown menu
-            VStack(alignment: .leading, spacing: 0) {
-                Button(action: {
-                    UserDefaults.standard.removeObject(forKey: "authToken")
-                    authManager.isAuthenticated = false // Add this line
-                    isPresented = false
-                }) {
-                    HStack {
-                        Image(systemName: "rectangle.portrait.and.arrow.right")
-                        Text("Logout")
-                    }
-                    .foregroundColor(.red)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                }
-            }
-            .background(Color(UIColor.systemBackground))
-            .cornerRadius(8)
-            .shadow(radius: 4)
-            .offset(x: -12, y: 60) // Adjusted offset
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+    init(completion: @escaping (UIImage?) -> Void, allowsEditing: Bool = false) {
+        self.completion = completion
+        self.allowsEditing = allowsEditing
+    }
+    
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.delegate = context.coordinator
+        picker.sourceType = .photoLibrary
+        picker.allowsEditing = allowsEditing // Enable editing/cropping
+        return picker
+    }
+    
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(completion: completion, allowsEditing: allowsEditing)
+    }
+    
+    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let completion: (UIImage?) -> Void
+        let allowsEditing: Bool
+        
+        init(completion: @escaping (UIImage?) -> Void, allowsEditing: Bool) {
+            self.completion = completion
+            self.allowsEditing = allowsEditing
+        }
+        
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+            let key: UIImagePickerController.InfoKey = allowsEditing ? .editedImage : .originalImage
+            let image = info[key] as? UIImage
+            completion(image)
+            picker.dismiss(animated: true)
+        }
+        
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            completion(nil)
+            picker.dismiss(animated: true)
         }
     }
 }
@@ -1753,6 +1809,10 @@ struct SignupView: View {
     }
 }
 
+struct ProfilePictureResponse: Codable {
+    let profilePictureUrl: String
+}
+
 // Add this new struct for video playback
 struct LoopingVideoPlayer: UIViewRepresentable {
     let videoName: String
@@ -2013,24 +2073,168 @@ struct ForgotPasswordView: View {
 }
 
 struct ProfileImageView: View {
+    @StateObject private var imageLoader = ImageLoader()
     let user: User
     let size: CGFloat = 44
     
     var body: some View {
         Group {
-            if let profileUrl = user.profilePictureUrl,
-               let url = URL(string: profileUrl) {
-                AsyncImageView(url: url)
+            if let image = imageLoader.image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: size, height: size)
+                    .clipShape(Circle())
             } else {
                 // Fallback to circle with initial
                 Circle()
-                    .fill(Color(red: 220/255, green: 220/255, blue: 220/255)) // Lighter grey background
+                    .fill(Color(red: 220/255, green: 220/255, blue: 220/255))
                     .frame(width: size, height: size)
                     .overlay(
                         Text(String(user.name.prefix(1)).uppercased())
-                            .foregroundColor(Color(red: 180/255, green: 180/255, blue: 180/255)) // Lighter grey text
-                            .font(.system(size: size * 0.5, weight: .regular)) // Regular and uppercase text
+                            .foregroundColor(Color(red: 180/255, green: 180/255, blue: 180/255))
+                            .font(.system(size: size * 0.5, weight: .regular))
                     )
+            }
+        }
+        .onChange(of: user.profilePictureUrl) { newUrl in
+            if let urlString = newUrl,
+               let url = URL(string: urlString) {
+                imageLoader.loadImage(from: url)
+            } else {
+                imageLoader.image = nil
+            }
+        }
+        .onAppear {
+            if let urlString = user.profilePictureUrl,
+               let url = URL(string: urlString) {
+                imageLoader.loadImage(from: url)
+            }
+        }
+    }
+}
+
+// Add this class to manage image loading
+class ImageLoader: ObservableObject {
+    @Published var image: UIImage?
+    private var currentUrl: URL?
+    
+    func loadImage(from url: URL) {
+        // If we're already loading this URL, don't reload
+        if currentUrl == url { return }
+        
+        currentUrl = url
+        URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+            guard let self = self,
+                  let data = data,
+                  let image = UIImage(data: data),
+                  self.currentUrl == url else { return }
+            
+            DispatchQueue.main.async {
+                self.image = image
+            }
+        }.resume()
+    }
+}
+
+// Add this class to manage user state
+class UserState: ObservableObject {
+    @Published var user: User?
+    
+    func updateProfilePicture(_ newUrl: String) {
+        if var currentUser = user {
+            currentUser.profilePictureUrl = newUrl
+            user = currentUser
+        }
+    }
+}
+
+// Update ProfileDropdownView to use UserState
+struct ProfileDropdownView: View {
+    @Binding var isPresented: Bool
+    @ObservedObject var userState: UserState
+    @EnvironmentObject var authManager: AuthManager
+    @State private var showImagePicker = false
+    @State private var showError = false
+    @State private var errorMessage = ""
+    
+    var body: some View {
+        ZStack {
+            if isPresented {
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation {
+                            isPresented = false
+                        }
+                    }
+            }
+            
+            VStack(alignment: .leading, spacing: 0) {
+                Button(action: {
+                    showImagePicker = true
+                }) {
+                    HStack {
+                        Image(systemName: "person.crop.circle")
+                        Text("Update Avatar")
+                    }
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                }
+                
+                Divider()
+                
+                Button(action: {
+                    UserDefaults.standard.removeObject(forKey: "authToken")
+                    authManager.isAuthenticated = false
+                    isPresented = false
+                }) {
+                    HStack {
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                        Text("Logout")
+                    }
+                    .foregroundColor(.red)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                }
+            }
+            .frame(width: 200) // Set fixed width
+            .background(Color(UIColor.systemBackground))
+            .cornerRadius(8)
+            .shadow(radius: 4)
+            .offset(x: -12, y: 60)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        }
+        .sheet(isPresented: $showImagePicker) {
+            ImagePicker(completion: handleImageSelection, allowsEditing: true)
+        }
+        .alert("Error", isPresented: $showError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage)
+        }
+    }
+    
+    private func handleImageSelection(_ image: UIImage?) {
+        guard let image = image,
+              let imageData = image.jpegData(compressionQuality: 0.7),
+              let token = UserDefaults.standard.string(forKey: "authToken") else {
+            return
+        }
+        
+        Task {
+            do {
+                let newProfileUrl = try await authManager.uploadProfilePicture(imageData: imageData, token: token)
+                await MainActor.run {
+                    userState.updateProfilePicture(newProfileUrl)
+                    isPresented = false
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = "Failed to update profile picture. Please try again."
+                    showError = true
+                }
             }
         }
     }
