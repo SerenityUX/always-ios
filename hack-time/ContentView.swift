@@ -3,6 +3,33 @@ import UIKit
 import AVFoundation
 import Foundation
 
+
+
+// Add a helper function to convert between Color and RGB string
+func colorToRGBString(_ color: Color) -> String {
+    // Convert Color to RGB values
+    let uiColor = UIColor(color)
+    var r: CGFloat = 0
+    var g: CGFloat = 0
+    var b: CGFloat = 0
+    var a: CGFloat = 0
+    uiColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+    
+    return "\(Int(r * 255)),\(Int(g * 255)),\(Int(b * 255)))"
+}
+
+func rgbStringToColor(_ rgbString: String) -> Color {
+    let components = rgbString.split(separator: ",").map { Int($0) ?? 0 }
+    guard components.count >= 3 else { return .black }
+    
+    return Color(
+        red: CGFloat(components[0])/255,
+        green: CGFloat(components[1])/255,
+        blue: CGFloat(components[2])/255
+    )
+}
+
+
 struct AsyncImageView: View {
     let url: URL
 
@@ -52,21 +79,30 @@ struct AsyncImageView: View {
 }
 
 struct CalendarEvent: Identifiable {
-    let id = UUID()
+    let id: UUID
     var title: String
     var startTime: Date
     var endTime: Date
     var color: Color
+    
+    init(id: UUID = UUID(), title: String, startTime: Date, endTime: Date, color: Color) {
+        self.id = id
+        self.title = title
+        self.startTime = startTime
+        self.endTime = endTime
+        self.color = color
+    }
 }
 
 struct EventView: View {
     let event: CalendarEvent
     let dayStartTime: Date
-    @State private var isEditing: Bool
+    @State private var isEditing: Bool = false  // Initialize with false
     @Binding var events: [CalendarEvent]
     @FocusState private var isFocused: Bool
     @State private var dragOffset: CGFloat = 0
     @State private var isDragging: Bool = false
+    @EnvironmentObject var authManager: AuthManager
 
     // Add these properties
     let impactMed = UIImpactFeedbackGenerator(style: .medium)
@@ -85,7 +121,7 @@ struct EventView: View {
     init(event: CalendarEvent, dayStartTime: Date, events: Binding<[CalendarEvent]>, isNewEvent: Bool = false) {
         self.event = event
         self.dayStartTime = dayStartTime
-        self._events = events
+        self._events = events  // Use _events to set the binding
         self._isEditing = State(initialValue: isNewEvent)
     }
     
@@ -179,11 +215,36 @@ struct EventView: View {
     private func updateEventTitle() {
         if let index = events.firstIndex(where: { $0.id == event.id }) {
             if events[index].title.isEmpty {
-                events.remove(at: index)
-                let impact = UIImpactFeedbackGenerator(style: .heavy)
-                impact.impactOccurred()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    impact.impactOccurred()
+                // Delete the event if title is empty
+                Task {
+                    do {
+                        try await authManager.deleteCalendarEvent(calendarEventId: event.id.uuidString)
+                        await MainActor.run {
+                            events.remove(at: index)
+                            let impact = UIImpactFeedbackGenerator(style: .heavy)
+                            impact.impactOccurred()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                impact.impactOccurred()
+                            }
+                        }
+                    } catch {
+                        print("Failed to delete event:", error)
+                    }
+                }
+            } else {
+                // Update the event title
+                Task {
+                    do {
+                        _ = try await authManager.updateCalendarEvent(
+                            calendarEventId: event.id.uuidString,
+                            title: events[index].title,
+                            startTime: nil as Date?,  // Add type information
+                            endTime: nil as Date?,    // Add type information
+                            color: nil as String?     // Add type information
+                        )
+                    } catch {
+                        print("Failed to update event title:", error)
+                    }
                 }
             }
         }
@@ -209,8 +270,26 @@ struct EventView: View {
     private func updateEventTime() {
         if let index = events.firstIndex(where: { $0.id == event.id }) {
             let minutesToAdd = Int(dragOffset / 72.0 * 60)
-            events[index].startTime = Calendar.current.date(byAdding: .minute, value: minutesToAdd, to: event.startTime)!
-            events[index].endTime = Calendar.current.date(byAdding: .minute, value: minutesToAdd, to: event.endTime)!
+            let newStartTime = Calendar.current.date(byAdding: .minute, value: minutesToAdd, to: event.startTime)!
+            let newEndTime = Calendar.current.date(byAdding: .minute, value: minutesToAdd, to: event.endTime)!
+            
+            Task {
+                do {
+                    _ = try await authManager.updateCalendarEvent(
+                        calendarEventId: event.id.uuidString,
+                        title: nil as String?,       // Add type information
+                        startTime: newStartTime,
+                        endTime: newEndTime,
+                        color: nil as String?        // Add type information
+                    )
+                    await MainActor.run {
+                        events[index].startTime = newStartTime
+                        events[index].endTime = newEndTime
+                    }
+                } catch {
+                    print("Failed to update event times:", error)
+                }
+            }
         }
     }
 }
@@ -230,6 +309,17 @@ class AuthManager: ObservableObject {
 
     private let baseURL = "https://serenidad.click/hacktime"
     
+    private func createDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+        formatter.timeZone = TimeZone(abbreviation: "UTC")
+        formatter.calendar = Calendar(identifier: .iso8601)
+        
+        decoder.dateDecodingStrategy = .formatted(formatter)
+        return decoder
+    }
 
     func uploadProfilePicture(imageData: Data, token: String) async throws -> String {
         let url = URL(string: "\(baseURL)/changeProfilePicture")!
@@ -346,9 +436,16 @@ class AuthManager: ObservableObject {
             throw AuthError.serverError
         }
         
-        let user = try JSONDecoder().decode(User.self, from: data)
+        // Add debug print to see the raw JSON
+        if let jsonString = String(data: data, encoding: .utf8) {
+            print("Raw JSON response:", jsonString)
+        }
+        
+        // Use the configured decoder
+        let decoder = createDecoder()
+        let user = try decoder.decode(User.self, from: data)
         await MainActor.run {
-            self.currentUser = user  // Store the user
+            self.currentUser = user
         }
         return user
     }
@@ -396,6 +493,130 @@ class AuthManager: ObservableObject {
             throw AuthError.serverError
         }
     }
+
+    // Add these new methods for calendar event management
+    func createCalendarEvent(eventId: String, calendarEventId: String, title: String, startTime: Date, endTime: Date, color: String) async throws -> APICalendarEvent {
+        let url = URL(string: "\(baseURL)/createCalendarEvent")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        guard let token = UserDefaults.standard.string(forKey: "authToken") else {
+            throw AuthError.invalidToken
+        }
+        
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        
+        let requestBody = CreateCalendarEventRequest(
+            token: token,
+            eventId: eventId,
+            calendarEventId: calendarEventId,
+            title: title,
+            startTime: startTime,
+            endTime: endTime,
+            color: color
+        )
+        
+        request.httpBody = try encoder.encode(requestBody)
+        if let jsonString = String(data: request.httpBody!, encoding: .utf8) {
+            print("Request body:", jsonString)
+        }
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        if let jsonString = String(data: data, encoding: .utf8) {
+            print("Response data:", jsonString)
+        }
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            if let errorJson = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
+                print("Server error:", errorJson.error)
+            }
+            throw AuthError.serverError
+        }
+        
+        // First decode using the response-specific struct
+        let decoder = createDecoder()
+        let creationResponse: CreateCalendarEventResponse = try decoder.decode(CreateCalendarEventResponse.self, from: data)
+        
+        // Then convert to our standard APICalendarEvent format
+        return APICalendarEvent(
+            id: creationResponse.id,
+            title: creationResponse.title,
+            startTime: creationResponse.startTime,
+            endTime: creationResponse.endTime,
+            color: creationResponse.color
+        )
+    }
+
+    
+    func updateCalendarEvent(calendarEventId: String, title: String?, startTime: Date?, endTime: Date?, color: String?) async throws -> APICalendarEvent {
+        let url = URL(string: "\(baseURL)/updateCalendarEvent")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        guard let token = UserDefaults.standard.string(forKey: "authToken") else {
+            throw AuthError.invalidToken
+        }
+        
+        var body: [String: Any] = ["token": token, "calendarEventId": calendarEventId]
+        if let title = title { body["title"] = title }
+        if let startTime = startTime { body["startTime"] = formatDate(startTime) }
+        if let endTime = endTime { body["endTime"] = formatDate(endTime) }
+        if let color = color { body["color"] = color }
+        
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AuthError.serverError
+        }
+        
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(APICalendarEvent.self, from: data)
+    }
+    
+    func deleteCalendarEvent(calendarEventId: String) async throws {
+        let url = URL(string: "\(baseURL)/deleteCalendarEvent")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        guard let token = UserDefaults.standard.string(forKey: "authToken") else {
+            throw AuthError.invalidToken
+        }
+        
+        let body = ["token": token, "calendarEventId": calendarEventId]
+        request.httpBody = try JSONEncoder().encode(body)
+        
+        let (_, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AuthError.serverError
+        }
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
 }
 
 // Add these models and enums
@@ -403,15 +624,64 @@ struct TokenResponse: Codable {
     let token: String
 }
 
+// Add these models before the User struct
+struct Event: Codable {
+    let id: String
+    let title: String
+    let owner: String
+    let calendar_events: [APICalendarEvent]
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case owner
+        case calendar_events = "calendar_events"  // Explicitly match API field name
+    }
+}
+
+// For direct API responses (using snake_case)
+struct APICalendarEventResponse: Codable {
+    let id: String
+    let title: String
+    let startTime: Date
+    let endTime: Date
+    let color: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case startTime = "start_time"
+        case endTime = "end_time"
+        case color
+    }
+}
+
+// For calendar events in user data (using camelCase)
+struct APICalendarEvent: Codable {
+    let id: String
+    let title: String
+    let startTime: Date
+    let endTime: Date
+    let color: String
+    
+    // Remove the CodingKeys enum since the API is already returning camelCase
+}
+
+
+// Update the User struct
 struct User: Codable {
     let email: String
     let name: String
     var profilePictureUrl: String?
     let token: String
+    let events: [String: Event]
     
     enum CodingKeys: String, CodingKey {
-        case email, name, token
+        case email
+        case name
         case profilePictureUrl = "profile_picture_url"
+        case token
+        case events
     }
 }
 
@@ -424,19 +694,63 @@ enum AuthError: Error {
     case invalidCode
 }
 
+// Add these with your other model definitions (near TokenResponse, User, etc.)
+struct CreateCalendarEventRequest: Codable {
+    let token: String
+    let eventId: String
+    let calendarEventId: String
+    let title: String
+    let startTime: Date
+    let endTime: Date
+    let color: String
+}
+
+struct CreateCalendarEventResponse: Codable {
+    let id: String
+    let title: String
+    let startTime: Date
+    let endTime: Date
+    let color: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case startTime = "start_time"
+        case endTime = "end_time"
+        case color
+    }
+}
+
+struct ErrorResponse: Codable {
+    let error: String
+}
+
 // Update ContentView to include environment object
 struct ContentView: View {
     @StateObject private var authManager = AuthManager()
-    
+     
     var body: some View {
         Group {
             if authManager.isAuthenticated {
-                MainContentView()
+                if let firstEvent = authManager.currentUser?.events.first?.value {
+                    MainContentView(initialEvents: firstEvent.calendar_events.map { calendarEvent in
+                        let color = rgbStringToColor(calendarEvent.color)
+                        return CalendarEvent(
+                            id: UUID(uuidString: calendarEvent.id)!,
+                            title: calendarEvent.title,
+                            startTime: calendarEvent.startTime,
+                            endTime: calendarEvent.endTime,
+                            color: color
+                        )
+                    })
+                } else {
+                    MainContentView()
+                }
             } else {
                 OnboardingView()
             }
         }
-        .environmentObject(authManager) // Add this line to pass authManager down
+        .environmentObject(authManager)
         .onAppear {
             checkAuth()
         }
@@ -523,7 +837,7 @@ struct MainContentView: View {
     
     @StateObject private var userState = UserState()
     
-    init() {
+    init(initialEvents: [CalendarEvent] = []) {
         let calendar = Calendar.current
         let now = Date()
         
@@ -537,22 +851,36 @@ struct MainContentView: View {
         // Set end time to 33 hours after start time
         self.endTime = calendar.date(byAdding: .hour, value: 33, to: self.startTime)!
         
-        // Add correct events
-        let sampleEvents = [
-            CalendarEvent(title: "Attendees begin to arrive", 
-                          startTime: self.startTime, 
-                          endTime: calendar.date(byAdding: .hour, value: 7, to: self.startTime)!, 
-                          color: Color(red: 218/255, green: 128/255, blue: 0/255)),
-            CalendarEvent(title: "Opening Ceremony", 
-                          startTime: calendar.date(byAdding: .hour, value: 7, to: self.startTime)!,
-                          endTime: calendar.date(byAdding: .hour, value: 8, to: self.startTime)!,
-                          color: Color(red: 2/255, green: 147/255, blue: 212/255)), // 0293D4 in RGB
-            CalendarEvent(title: "Dinner + Hacking Begins", 
-                          startTime: calendar.date(byAdding: .hour, value: 8, to: self.startTime)!, 
-                          endTime: calendar.date(byAdding: .hour, value: 12, to: self.startTime)!, 
-                          color: Color(red: 8/255, green: 164/255, blue: 42/255)) // 08A42A in RGB
-        ]
-        _events = State(initialValue: sampleEvents)
+        // Use initialEvents if provided, otherwise use sample events
+        if !initialEvents.isEmpty {
+            _events = State(initialValue: initialEvents)
+        } else {
+            // Your existing sample events code
+
+
+                        let sampleEvents = [
+                CalendarEvent(title: "Create your first calendar event...", 
+                             startTime: self.startTime, 
+                             endTime: calendar.date(byAdding: .hour, value: 7, to: self.startTime)!, 
+                             color: Color(red: 218/255, green: 128/255, blue: 0/255))
+            ]
+
+            // let sampleEvents = [
+            //     CalendarEvent(title: "Attendees begin to arrive", 
+            //                  startTime: self.startTime, 
+            //                  endTime: calendar.date(byAdding: .hour, value: 7, to: self.startTime)!, 
+            //                  color: Color(red: 218/255, green: 128/255, blue: 0/255)),
+            //     CalendarEvent(title: "Opening Ceremony", 
+            //                  startTime: calendar.date(byAdding: .hour, value: 7, to: self.startTime)!,
+            //                  endTime: calendar.date(byAdding: .hour, value: 8, to: self.startTime)!,
+            //                  color: Color(red: 2/255, green: 147/255, blue: 212/255)), // 0293D4 in RGB
+            //     CalendarEvent(title: "Dinner + Hacking Begins", 
+            //                  startTime: calendar.date(byAdding: .hour, value: 8, to: self.startTime)!, 
+            //                  endTime: calendar.date(byAdding: .hour, value: 12, to: self.startTime)!, 
+            //                  color: Color(red: 8/255, green: 164/255, blue: 42/255)) // 08A42A in RGB
+            // ]
+            _events = State(initialValue: sampleEvents)
+        }
     }
     
     var body: some View {
@@ -881,8 +1209,8 @@ struct MainContentView: View {
     }
     
     private func formatDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, yyyy h:mm a"
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.string(from: date)
     }
     
@@ -895,32 +1223,77 @@ struct MainContentView: View {
     }
     
     private func createCalendarEvent(start: Date, end: Date) {
-        // Check for overlaps
-        if events.contains(where: { event in
-            (start >= event.startTime && start < event.endTime) ||
-            (end > event.startTime && end <= event.endTime) ||
-            (start <= event.startTime && end >= event.endTime)
-        }) {
-            print("Cannot create event: Overlaps with existing event")
-            notificationFeedback.notificationOccurred(.error)
+        guard let eventId = authManager.currentUser?.events.first?.key else {
+            print("No event ID found")
             return
         }
         
-        // Create new CalendarEvent
+        let calendarEventId = UUID().uuidString
+        print("Generated calendar event ID:", calendarEventId)
+        
+        let r: Double = 2
+        let g: Double = 147
+        let b: Double = 212
+        
+        let eventColor = Color(
+            red: r/255.0,
+            green: g/255.0,
+            blue: b/255.0
+        )
         let newEvent = CalendarEvent(
+            id: UUID(uuidString: calendarEventId)!,
             title: "",
             startTime: start,
             endTime: end,
-            color: Color(red: 2/255, green: 147/255, blue: 212/255)
+            color: eventColor
         )
         
-        // Add to events array
-        events.append(newEvent)
-        newEventId = newEvent.id
+        // Format color as "R,G,B" string
+        let colorString = "\(Int(r)),\(Int(g)),\(Int(b)))"
         
-        print("Event created: \(formatDate(start)) - \(formatDate(end))")
-        impactHeavy.impactOccurred()
+        Task {
+            do {
+                let createdEvent = try await authManager.createCalendarEvent(
+                    eventId: eventId,
+                    calendarEventId: calendarEventId,
+                    title: newEvent.title,
+                    startTime: start,
+                    endTime: end,
+                    color: colorString
+                )
+                
+                print("Successfully created event with ID:", createdEvent.id)
+                
+                // Convert the API response back to a CalendarEvent
+                let color = createdEvent.color.split(separator: ",").map { Int($0) ?? 0 }
+                let uiColor = Color(
+                    red: CGFloat(color[0])/255.0,
+                    green: CGFloat(color[1])/255.0,
+                    blue: CGFloat(color[2])/255.0
+                )
+                
+                let calendarEvent = CalendarEvent(
+                    id: UUID(uuidString: createdEvent.id)!,
+                    title: createdEvent.title,
+                    startTime: createdEvent.startTime,
+                    endTime: createdEvent.endTime,
+                    color: uiColor
+                )
+                
+                await MainActor.run {
+                    events.append(calendarEvent)
+                    newEventId = calendarEvent.id
+                    impactHeavy.impactOccurred()
+                }
+            } catch {
+                print("Failed to create calendar event:")
+                print("Error details:", error)
+                notificationFeedback.notificationOccurred(.error)
+            }
+        }
     }
+
+
 
     private func loadUserData() {
         guard let token = UserDefaults.standard.string(forKey: "authToken") else { return }
@@ -1057,7 +1430,7 @@ struct EventPreviewView: View {
 // Add this new struct for the event detail modal
 struct EventDetailModalView: View {
     @State private var selectedColor: Color
-    let event: CalendarEvent
+    var event: CalendarEvent
     @Binding var events: [CalendarEvent]
     @Environment(\.presentationMode) var presentationMode
     
@@ -1083,6 +1456,8 @@ struct EventDetailModalView: View {
         case start
         case end
     }
+    
+    @EnvironmentObject var authManager: AuthManager  // Add this line
     
     init(event: CalendarEvent, events: Binding<[CalendarEvent]>) {
         self.event = event
@@ -1277,7 +1652,33 @@ struct EventDetailModalView: View {
     
     private func updateEventColor() {
         if let index = events.firstIndex(where: { $0.id == event.id }) {
-            events[index].color = selectedColor
+            let colorString = colorToRGBString(selectedColor)
+            
+            Task {
+                do {
+                    // Update the UI immediately for a smoother experience
+                    await MainActor.run {
+                        events[index].color = selectedColor
+                        impactMed.impactOccurred()
+                    }
+                    
+                    // Then update the server
+                    _ = try await authManager.updateCalendarEvent(
+                        calendarEventId: event.id.uuidString,
+                        title: event.title,
+                        startTime: event.startTime,
+                        endTime: event.endTime,
+                        color: colorString
+                    )
+                } catch {
+                    // If the server update fails, revert the UI change
+                    print("Failed to update event color:", error)
+                    await MainActor.run {
+                        events[index].color = event.color
+                        notificationFeedback.notificationOccurred(.error)
+                    }
+                }
+            }
         }
     }
     
@@ -1616,6 +2017,7 @@ struct LoginView: View {
         }
     }
 }
+
 
 // Update SignupView to use the environment object
 struct SignupView: View {
