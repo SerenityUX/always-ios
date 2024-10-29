@@ -14,10 +14,11 @@ struct ContentView: View {
         Group {
             if authManager.isAuthenticated {
                 if let firstEvent = authManager.currentUser?.events.first?.value {
-                    MainContentView(initialEvents: firstEvent.calendar_events.map { calendarEvent in
+                    MainContentView(initialEvents: firstEvent.calendar_events.compactMap { calendarEvent in
+                        guard let uuid = UUID(uuidString: calendarEvent.id) else { return nil }
                         let color = rgbStringToColor(calendarEvent.color)
                         return CalendarEvent(
-                            id: UUID(uuidString: calendarEvent.id)!,
+                            id: uuid,
                             title: calendarEvent.title,
                             startTime: calendarEvent.startTime,
                             endTime: calendarEvent.endTime,
@@ -59,7 +60,9 @@ struct ContentView: View {
     }
 }
 
-#Preview {
-    ContentView()
-        .preferredColorScheme(.light)
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+            .preferredColorScheme(.light)
+    }
 }

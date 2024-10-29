@@ -138,3 +138,25 @@ struct ProfileDropdownView: View {
         }
     }
 }
+
+struct ProfileViews_Previews: PreviewProvider {
+    static var previews: some View {
+        // Create a sample user for preview
+        let sampleUser = User(
+            email: "test@example.com",
+            name: "John Doe",
+            profilePictureUrl: nil,
+            token: "sample-token",
+            events: [:]
+        )
+        
+        Group {
+            ProfileImageView(user: sampleUser)
+            ProfileDropdownView(
+                isPresented: .constant(true),
+                userState: UserState()
+            )
+            .environmentObject(AuthManager())
+        }
+    }
+}

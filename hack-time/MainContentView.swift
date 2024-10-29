@@ -24,6 +24,61 @@ struct MainContentView: View {
         return dynamicTags
     }
     
+    var filteredEvents: [CalendarEvent] {
+        guard let event = currentEvent else { return [] }
+        
+        switch selectedTag {
+        case "Event":
+            return events
+        case "You":
+            guard let currentUserEmail = authManager.currentUser?.email else { return [] }
+            return events.filter { calendarEvent in
+                // Find matching task for this calendar event
+                event.tasks.first { task in
+                    // Match task time with calendar event time
+                    task.startTime == calendarEvent.startTime &&
+                    task.endTime == calendarEvent.endTime &&
+                    // Check if current user is assigned to this task
+                    task.assignedTo.contains { $0.email == currentUserEmail }
+                } != nil
+            }
+        default:
+            // Filter by selected team member name
+            return events.filter { calendarEvent in
+                // Find matching task for this calendar event
+                event.tasks.first { task in
+                    // Match task time with calendar event time
+                    task.startTime == calendarEvent.startTime &&
+                    task.endTime == calendarEvent.endTime &&
+                    // Check if selected team member is assigned to this task
+                    task.assignedTo.contains { $0.name == selectedTag }
+                } != nil
+            }
+        }
+    }
+    
+    var filteredTasks: [EventTask] {
+        guard let firstEvent = authManager.currentUser?.events.first?.value else { return [] }
+        
+        switch selectedTag {
+        case "Event":
+            return firstEvent.tasks
+        case "You":
+            return firstEvent.tasks.filter { task in
+                task.assignedTo.contains { user in
+                    user.email == authManager.currentUser?.email
+                }
+            }
+        default:
+            // Filter by selected team member name
+            return firstEvent.tasks.filter { task in
+                task.assignedTo.contains { user in
+                    user.name == selectedTag
+                }
+            }
+        }
+    }
+    
     @State private var dragOffset: CGFloat = 0
     @State private var previousDragValue: DragGesture.Value?
     @Namespace private var tagNamespace
@@ -177,14 +232,14 @@ struct MainContentView: View {
                     }
                     
                     if showEvents {
-                        ForEach(events.indices, id: \.self) { index in
-                            EventView(event: events[index], dayStartTime: startTime, events: $events, isNewEvent: events[index].id == newEventId)
+                        ForEach(filteredEvents.indices, id: \.self) { index in
+                            EventView(event: filteredEvents[index], dayStartTime: startTime, events: $events, isNewEvent: filteredEvents[index].id == newEventId)
                                 .padding(.leading, 42)
-                                .offset(y: calculateEventOffset(for: events[index]))
+                                .offset(y: calculateEventOffset(for: filteredEvents[index]))
                                 .offset(x: eventOffset)
                                 .animation(.spring(), value: eventOffset)
                                 .onTapGesture {
-                                    selectedEvent = events[index]
+                                    selectedEvent = filteredEvents[index]
                                 }
                         }
                         .transition(.move(edge: .leading))
@@ -484,5 +539,37 @@ struct MainContentView: View {
                 print("Failed to load user data:", error)
             }
         }
+    }
+
+    var currentEvent: Event? {
+        authManager.currentUser?.events.first?.value
+    }
+}
+
+struct TaskView: View {
+    let task: EventTask
+    
+    var body: some View {
+        VStack(alignment: .leading) {
+            Text(task.title)
+                .font(.headline)
+            Text(task.description)
+                .font(.subheadline)
+                .foregroundColor(.gray)
+            HStack {
+                ForEach(task.assignedTo, id: \.email) { user in
+                    Text(user.name)
+                        .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.gray.opacity(0.2))
+                        .cornerRadius(8)
+                }
+            }
+        }
+        .padding()
+        .background(Color.white)
+        .cornerRadius(12)
+        .shadow(radius: 2)
     }
 }
