@@ -59,7 +59,7 @@ struct MainContentView: View {
     
     var filteredTasks: [EventTask] {
         guard let firstEvent = authManager.currentUser?.events.first?.value else { return [] }
-        
+
         switch selectedTag {
         case "Event":
             return firstEvent.tasks
@@ -77,6 +77,13 @@ struct MainContentView: View {
                 }
             }
         }
+    }
+    
+    func getFilteredTasks(forEmail email: String?) -> [EventTask] {
+    guard let email = email,
+          let firstEvent = authManager.currentUser?.events.first?.value else { return [] }
+    
+    return firstEvent.tasksForUser(email: email)
     }
     
     @State private var dragOffset: CGFloat = 0
@@ -97,6 +104,10 @@ struct MainContentView: View {
     @State private var selectedEvent: CalendarEvent?
     @State private var showProfileDropdown = false
     @State private var user: User?
+    
+    @State private var previousEvents: [CalendarEvent] = []
+    @State private var isAnimatingTransition = false
+    @State private var transitionOffset: CGFloat = 0
     
     let impactMed = UIImpactFeedbackGenerator(style: .medium)
     let impactHeavy = UIImpactFeedbackGenerator(style: .heavy)
@@ -176,6 +187,23 @@ struct MainContentView: View {
                                         .stroke(Color(red: 89/255, green: 99/255, blue: 110/255), lineWidth: selectedTag == tag ? 0 : 1)
                                 )
                                 .onTapGesture {
+                                    let userEmail: String? = {
+                                        switch tag {
+                                        case "You":
+                                            return authManager.currentUser?.email
+                                        case "Event":
+                                            return nil
+                                        default:
+                                            // Find team member's email by their name
+                                            return currentEvent?.teamMembers.first(where: { $0.name == tag })?.email
+                                        }
+                                    }()
+                                    
+                                    if let email = userEmail {
+                                        let tasks = getFilteredTasks(forEmail: email)
+                                        print("Tasks for \(tag):", tasks)
+                                    }
+                                    
                                     if selectedTag != tag {
                                         selectedTag = tag
                                         generateHapticFeedback()
@@ -335,7 +363,7 @@ struct MainContentView: View {
                 }
         )
         .onChange(of: selectedTag) { newValue in
-            withAnimation(.easeInOut(duration: 0.5)) {
+            withAnimation(.easeInOut(duration: 0.3)) {
                 showEvents = (newValue == "Event")
                 if !showEvents {
                     eventOffset = -UIScreen.main.bounds.width
@@ -375,18 +403,22 @@ struct MainContentView: View {
     private func selectNextTag() {
         if let currentIndex = tags.firstIndex(of: selectedTag),
            currentIndex < tags.count - 1 {
-            selectedTag = tags[currentIndex + 1]
-            generateHapticFeedback()
-            animateEventTransition(direction: .trailing)
+            withAnimation(.easeInOut(duration: 0.3)) {
+                selectedTag = tags[currentIndex + 1]
+                generateHapticFeedback()
+                animateEventTransition(direction: .trailing)
+            }
         }
     }
 
     private func selectPreviousTag() {
         if let currentIndex = tags.firstIndex(of: selectedTag),
            currentIndex > 0 {
-            selectedTag = tags[currentIndex - 1]
-            generateHapticFeedback()
-            animateEventTransition(direction: .leading)
+            withAnimation(.easeInOut(duration: 0.3)) {
+                selectedTag = tags[currentIndex - 1]
+                generateHapticFeedback()
+                animateEventTransition(direction: .leading)
+            }
         }
     }
 

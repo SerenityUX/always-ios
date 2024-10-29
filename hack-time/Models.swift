@@ -206,3 +206,14 @@ struct AssignedUser: Codable {
     let profilePicture: String?
     let email: String
 }
+
+// Add this extension to Event
+extension Event {
+    func tasksForUser(email: String) -> [EventTask] {
+        return tasks.filter { task in
+            task.assignedTo.contains { member in
+                member.email == email
+            }
+        }
+    }
+}
