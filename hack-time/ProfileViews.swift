@@ -54,6 +54,7 @@ struct ProfileDropdownView: View {
     @ObservedObject var userState: UserState
     @EnvironmentObject var authManager: AuthManager
     @State private var showImagePicker = false
+    @State private var showEventSelection = false
     @State private var showError = false
     @State private var errorMessage = ""
     
@@ -76,6 +77,20 @@ struct ProfileDropdownView: View {
                     HStack {
                         Image(systemName: "person.crop.circle")
                         Text("Update Avatar")
+                    }
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                }
+                
+                Divider()
+                
+                Button(action: {
+                    showEventSelection = true
+                }) {
+                    HStack {
+                        Image(systemName: "calendar")
+                        Text("Change Events")
                     }
                     .foregroundColor(.primary)
                     .padding(.horizontal, 12)
@@ -108,6 +123,9 @@ struct ProfileDropdownView: View {
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(completion: handleImageSelection, allowsEditing: true)
         }
+        .sheet(isPresented: $showEventSelection) {
+            EventSelectionView()
+        }
         .alert("Error", isPresented: $showError) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -136,6 +154,53 @@ struct ProfileDropdownView: View {
                 }
             }
         }
+    }
+}
+
+struct EventSelectionView: View {
+    @EnvironmentObject var authManager: AuthManager
+    @Environment(\.dismiss) var dismiss
+    
+    var body: some View {
+        NavigationView {
+            List {
+                if let events = authManager.currentUser?.events {
+                    ForEach(Array(events), id: \.key) { eventId, event in
+                        Button(action: {
+                            authManager.selectedEventId = eventId
+                            dismiss()
+                        }) {
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text(event.title)
+                                        .font(.headline)
+                                    Text(formatEventDate(event.startTime))
+                                        .font(.subheadline)
+                                        .foregroundColor(.gray)
+                                }
+                                
+                                Spacer()
+                                
+                                if eventId == authManager.selectedEventId {
+                                    Image(systemName: "checkmark")
+                                        .foregroundColor(.blue)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Select Event")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+    
+    private func formatEventDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy"
+        formatter.timeZone = TimeZone(abbreviation: "UTC")!
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter.string(from: date)
     }
 }
 

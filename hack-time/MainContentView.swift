@@ -8,70 +8,71 @@
 import SwiftUI
 
 struct MainContentView: View {
-    let startTime: Date
-    let endTime: Date
+    @State var startTime: Date
+    @State var endTime: Date
     
     @State private var selectedTag: String = "Event"
     
     var tags: [String] {
         var dynamicTags = ["Event", "You"]
         
-        if let firstEvent = authManager.currentUser?.events.first?.value {
-            let teamMemberNames = firstEvent.teamMembers.map { $0.name }
+        if let event = authManager.selectedEvent {
+            let teamMemberNames = event.teamMembers.map { $0.name }
             dynamicTags.append(contentsOf: teamMemberNames)
         }
         
         return dynamicTags
     }
     
+    @State private var forceUpdate: Bool = false
+    
     var filteredEvents: [CalendarEvent] {
-        guard let event = currentEvent else { return [] }
+        guard let event = authManager.selectedEvent else { return [] }
+        
+        // Force the computed property to update when forceUpdate changes
+        _ = forceUpdate
+        
+        // Convert API events to CalendarEvents
+        let calendarEvents = event.calendarEvents.map(convertAPIEventToCalendarEvent)
         
         switch selectedTag {
         case "Event":
-            return events
+            return calendarEvents
         case "You":
             guard let currentUserEmail = authManager.currentUser?.email else { return [] }
-            return events.filter { calendarEvent in
-                // Find matching task for this calendar event
-                event.tasks.first { task in
-                    // Match task time with calendar event time
+            return calendarEvents.filter { calendarEvent in
+                event.tasks.contains { task in
                     task.startTime == calendarEvent.startTime &&
                     task.endTime == calendarEvent.endTime &&
-                    // Check if current user is assigned to this task
                     task.assignedTo.contains { $0.email == currentUserEmail }
-                } != nil
+                }
             }
         default:
-            // Filter by selected team member name
-            return events.filter { calendarEvent in
-                // Find matching task for this calendar event
-                event.tasks.first { task in
-                    // Match task time with calendar event time
+            return calendarEvents.filter { calendarEvent in
+                event.tasks.contains { task in
                     task.startTime == calendarEvent.startTime &&
                     task.endTime == calendarEvent.endTime &&
-                    // Check if selected team member is assigned to this task
                     task.assignedTo.contains { $0.name == selectedTag }
-                } != nil
+                }
             }
         }
     }
     
     var filteredTasks: [EventTask] {
-        guard let firstEvent = authManager.currentUser?.events.first?.value else { return [] }
+        guard let event = authManager.selectedEvent else { return [] }
 
         switch selectedTag {
         case "Event":
-            return firstEvent.tasks
+            return event.tasks
         case "You":
-            return firstEvent.tasks.filter { task in
+            return event.tasks.filter { task in
                 task.assignedTo.contains { user in
                     user.email == authManager.currentUser?.email
                 }
             }
         default:
             // Filter by selected team member name
-            return firstEvent.tasks.filter { task in
+            return event.tasks.filter { task in
                 task.assignedTo.contains { user in
                     user.name == selectedTag
                 }
@@ -81,9 +82,9 @@ struct MainContentView: View {
     
     func getFilteredTasks(forEmail email: String?) -> [EventTask] {
     guard let email = email,
-          let firstEvent = authManager.currentUser?.events.first?.value else { return [] }
+          let event = authManager.selectedEvent else { return [] }
     
-    return firstEvent.tasksForUser(email: email)
+    return event.tasksForUser(email: email)
     }
     
     @State private var dragOffset: CGFloat = 0
@@ -129,24 +130,30 @@ struct MainContentView: View {
     @FocusState private var isTaskTitleFocused: Bool
     
     init(initialEvents: [CalendarEvent] = []) {
-        let calendar = Calendar.current
+        var calendar = Calendar.current
+        calendar.timeZone = TimeZone(abbreviation: "UTC")!
         let now = Date()
         
+        // Start with default times
         var startComponents = calendar.dateComponents([.year, .month, .day], from: now)
         startComponents.hour = 8
         startComponents.minute = 0
         startComponents.second = 0
-        self.startTime = calendar.date(from: startComponents)!
+        startComponents.timeZone = TimeZone(abbreviation: "UTC")  // Force UTC
+        let defaultStart = calendar.date(from: startComponents)!
+        let defaultEnd = calendar.date(byAdding: .hour, value: 24, to: defaultStart)!
         
-        self.endTime = calendar.date(byAdding: .hour, value: 33, to: self.startTime)!
+        // Initialize @State properties
+        _startTime = State(initialValue: defaultStart)
+        _endTime = State(initialValue: defaultEnd)
         
         if !initialEvents.isEmpty {
             _events = State(initialValue: initialEvents)
         } else {
             let sampleEvents = [
                 CalendarEvent(title: "Create your first calendar event... (delete this one)",
-                             startTime: self.startTime,
-                             endTime: calendar.date(byAdding: .hour, value: 0, to: self.startTime)!,
+                             startTime: defaultStart,
+                             endTime: calendar.date(byAdding: .hour, value: 1, to: defaultStart)!,
                              color: Color(red: 218/255, green: 128/255, blue: 0/255))
             ]
             _events = State(initialValue: sampleEvents)
@@ -496,7 +503,11 @@ struct MainContentView: View {
                 .presentationDragIndicator(.visible)
         }
         .onAppear {
-            timelinePoints = hoursBetween(start: startTime, end: endTime)
+            if let event = authManager.selectedEvent {
+                startTime = event.startTime
+                endTime = event.endTime
+                timelinePoints = hoursBetween(start: startTime, end: endTime)
+            }
         }
         .overlay(
             Group {
@@ -510,6 +521,10 @@ struct MainContentView: View {
         )
         .task {
             loadUserData()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RefreshCalendarEvents"))) { _ in
+            // Toggle forceUpdate to trigger a recalculation of filteredEvents
+            forceUpdate.toggle()
         }
     }
 
@@ -579,12 +594,16 @@ struct MainContentView: View {
     private func formatTime(date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "ha"
+        formatter.timeZone = TimeZone(abbreviation: "UTC")!
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         return formatter.string(from: date).lowercased()
     }
     
     private func formatWeekday(date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEE"
+        formatter.timeZone = TimeZone(abbreviation: "UTC")!
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         return formatter.string(from: date).uppercased()
     }
     
@@ -602,10 +621,13 @@ struct MainContentView: View {
         var currentDate = start
         var yPosition: CGFloat = 0
         
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(abbreviation: "UTC")!
+        
         while currentDate <= end {
             let point = TimelinePoint(date: currentDate, yPosition: yPosition)
             points.append(point)
-            currentDate = Calendar.current.date(byAdding: .hour, value: 1, to: currentDate)!
+            currentDate = calendar.date(byAdding: .hour, value: 1, to: currentDate)!
             yPosition += 72.0
         }
         
@@ -621,7 +643,8 @@ struct MainContentView: View {
     }
     
     private func calculateEventOffset(for event: CalendarEvent) -> CGFloat {
-        let calendar = Calendar.current
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(abbreviation: "UTC")!
         let components = calendar.dateComponents([.hour, .minute], from: startTime, to: event.startTime)
         let hours = CGFloat(components.hour ?? 0)
         let minutes = CGFloat(components.minute ?? 0)
@@ -629,7 +652,7 @@ struct MainContentView: View {
     }
     
     private func createCalendarEvent(start: Date, end: Date) {
-        guard let eventId = authManager.currentUser?.events.first?.key else {
+        guard let eventId = authManager.selectedEventId ?? authManager.currentUser?.events.first?.key else {
             print("No event ID found")
             return
         }
@@ -685,9 +708,24 @@ struct MainContentView: View {
                 )
                 
                 await MainActor.run {
-                    events.append(calendarEvent)
-                    newEventId = calendarEvent.id
-                    impactHeavy.impactOccurred()
+                    if var user = authManager.currentUser,
+                       var event = user.events[eventId] {
+                        // Convert the new calendar event to API format
+                        let apiEvent = APICalendarEvent(
+                            id: createdEvent.id,
+                            title: createdEvent.title,
+                            startTime: createdEvent.startTime,
+                            endTime: createdEvent.endTime,
+                            color: createdEvent.color
+                        )
+                        // Add the new event to the selected event's calendar events
+                        event.calendarEvents.append(apiEvent)
+                        user.events[eventId] = event
+                        authManager.currentUser = user
+                        
+                        newEventId = calendarEvent.id
+                        impactHeavy.impactOccurred()
+                    }
                 }
             } catch {
                 print("Failed to create calendar event:")
@@ -878,6 +916,22 @@ struct MainContentView: View {
             }
         }
     }
+
+    // Add this helper function at the top of MainContentView
+    private func convertAPIEventToCalendarEvent(_ apiEvent: APICalendarEvent) -> CalendarEvent {
+        let color = apiEvent.color.split(separator: ",").map { Int($0) ?? 0 }
+        return CalendarEvent(
+            id: UUID(uuidString: apiEvent.id) ?? UUID(),
+            title: apiEvent.title,
+            startTime: apiEvent.startTime,
+            endTime: apiEvent.endTime,
+            color: Color(
+                red: CGFloat(color[0])/255.0,
+                green: CGFloat(color[1])/255.0,
+                blue: CGFloat(color[2])/255.0
+            )
+        )
+    }
 }
 
 struct TaskView: View {
@@ -954,7 +1008,7 @@ struct InitialsView: View {
     }
 }
 
-// Update TaskTimelineView
+// Update TaskTimelineView to use UTC time
 struct TaskTimelineView: View {
     let task: EventTask
     let dayStartTime: Date
@@ -998,9 +1052,11 @@ struct TaskTimelineView: View {
     
     private func formatEventTime(start: Date, end: Date) -> String {
         let formatter = DateFormatter()
+        formatter.timeZone = TimeZone(abbreviation: "UTC")  // Force UTC timezone
         
         let formatTime: (Date) -> String = { date in
-            let calendar = Calendar.current
+            var calendar = Calendar.current
+            calendar.timeZone = TimeZone(abbreviation: "UTC")!  // Use UTC calendar
             let minutes = calendar.component(.minute, from: date)
             if minutes == 0 {
                 formatter.dateFormat = "ha"  // Will show like "2pm"
@@ -1123,7 +1179,7 @@ struct TaskTimelineView: View {
     }
 }
 
-// Add this view for task preview
+// Update TaskPreviewView to use UTC time
 struct TaskPreviewView: View {
     let startTime: Date
     let endTime: Date
@@ -1158,6 +1214,7 @@ struct TaskPreviewView: View {
     
     private func formatEventTime(start: Date, end: Date) -> String {
         let formatter = DateFormatter()
+        formatter.timeZone = TimeZone(abbreviation: "UTC")  // Force UTC timezone
         formatter.dateFormat = "h:mm a"
         return "\(formatter.string(from: start).lowercased()) - \(formatter.string(from: end).lowercased())"
     }
@@ -1193,6 +1250,8 @@ struct TaskDetailModalView: View {
     
     let impactMed = UIImpactFeedbackGenerator(style: .medium)
     let notificationFeedback = UINotificationFeedbackGenerator()
+    
+    @State private var showAssigneeSheet = false
     
     init(task: EventTask, currentUser: Binding<User?>) {
         self.task = task
@@ -1301,21 +1360,78 @@ struct TaskDetailModalView: View {
                     .padding(.horizontal)
                     
                     // Assignees section
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Assigned to")
-                            .font(.headline)
-                        
+                    VStack(alignment: .leading, spacing: 12) {
                         HStack {
-                            ForEach(task.assignedTo, id: \.email) { user in
-                                TaskAssigneeView(user: user)
-                                    .overlay(
-                                        Circle()
-                                            .stroke(Color.white, lineWidth: 2)
-                                    )
+                            Text("Assigned to")
+                                .font(.headline)
+                            Spacer()
+                            Button(action: {
+                                showAssigneeSheet = true
+                            }) {
+                                Image(systemName: "plus.circle.fill")
+                                    .foregroundColor(Color(red: 89/255, green: 99/255, blue: 110/255))
+                                    .font(.system(size: 24))
                             }
                         }
+                            .padding(.horizontal)
+                        
+                        VStack(spacing: 12) {
+                            ForEach(task.assignedTo, id: \.email) { user in
+                                HStack(spacing: 12) {
+                                    if let profilePicture = user.profilePicture {
+                                        AsyncImage(url: URL(string: profilePicture)) { image in
+                                            image
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fill)
+                                                .frame(width: 40, height: 40)
+                                                .clipShape(Circle())
+                                        } placeholder: {
+                                            InitialsView(name: user.name, size: 40)
+                                        }
+                                    } else {
+                                        InitialsView(name: user.name, size: 40)
+                                    }
+                                    
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(user.name)
+                                            .font(.system(size: 16, weight: .medium))
+                                        Text(user.email)
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.gray)
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    if task.assignedTo.count > 1 {
+                                        Button(action: {
+                                            unassignUser(email: user.email)
+                                        }) {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .foregroundColor(Color(UIColor.systemGray3))
+                                                .font(.system(size: 20))
+                                        }
+                                    }
+                                }
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, 12)
+                                .background(Color(UIColor.systemGray6))
+                                .cornerRadius(8)
+                            }
+                        }
+                        .padding(.horizontal)
+                        .sheet(isPresented: $showAssigneeSheet) {
+                            AssigneeSelectionView(
+                                currentAssignees: task.assignedTo,
+                                teamMembers: currentUser?.events.first?.value.teamMembers ?? [],
+                                onAssign: { email in
+                                    assignUser(email: email)
+                                    showAssigneeSheet = false
+                                }
+                            )
+                            .presentationDetents([.medium])
+                            .presentationDragIndicator(.visible)
+                        }
                     }
-                    .padding(.horizontal)
                 }
                 .padding(.vertical)
             }
@@ -1366,6 +1482,7 @@ struct TaskDetailModalView: View {
     private func formatTime(date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mm a"
+        formatter.timeZone = TimeZone(abbreviation: "UTC")  // Force UTC timezone
         return formatter.string(from: date).lowercased()
     }
     
@@ -1481,10 +1598,160 @@ struct TaskDetailModalView: View {
         }
     }
 
-    // Add this helper function to TaskDetailModalView
+    // Update TaskDetailModalView to use UTC time
     private func formatEventDate(date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEEE, MMMM d, yyyy"
+        formatter.timeZone = TimeZone(abbreviation: "UTC")  // Force UTC timezone
         return formatter.string(from: date)
+    }
+
+    private func assignUser(email: String) {
+        Task {
+            do {
+                let updatedTask = try await authManager.assignEventTask(
+                    taskId: task.id,
+                    assigneeEmail: email
+                )
+                
+                await MainActor.run {
+                    updateLocalTask(updatedTask)
+                    impactMed.impactOccurred()
+                }
+            } catch {
+                print("Failed to assign user:", error)
+                notificationFeedback.notificationOccurred(.error)
+            }
+        }
+    }
+
+    private func unassignUser(email: String) {
+        Task {
+            do {
+                let updatedTask = try await authManager.unassignEventTask(
+                    taskId: task.id,
+                    userEmailToRemove: email
+                )
+                
+                await MainActor.run {
+                    updateLocalTask(updatedTask)
+                    impactMed.impactOccurred()
+                }
+            } catch {
+                print("Failed to unassign user:", error)
+                notificationFeedback.notificationOccurred(.error)
+            }
+        }
+    }
+}
+
+struct AssigneeSelectionView: View {
+    let currentAssignees: [AssignedUser]
+    let teamMembers: [TeamMember]
+    let onAssign: (String) -> Void
+    @EnvironmentObject var authManager: AuthManager
+    
+    var availableMembers: [TeamMember] {
+        teamMembers.filter { member in
+            !currentAssignees.contains { $0.email == member.email }
+        }
+    }
+    
+    var currentUserAvailable: Bool {
+        guard let currentUserEmail = authManager.currentUser?.email else { return false }
+        return !currentAssignees.contains { $0.email == currentUserEmail }
+    }
+    
+    var body: some View {
+        NavigationView {
+            List {
+                // Combined section with current user first
+                if currentUserAvailable, let currentUser = authManager.currentUser {
+                    Button(action: {
+                        onAssign(currentUser.email)
+                    }) {
+                        HStack(spacing: 12) {
+                            if let profilePicture = currentUser.profilePictureUrl {
+                                AsyncImage(url: URL(string: profilePicture)) { image in
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                        .frame(width: 40, height: 40)
+                                        .clipShape(Circle())
+                                } placeholder: {
+                                    InitialsView(name: currentUser.name, size: 40)
+                                }
+                            } else {
+                                InitialsView(name: currentUser.name, size: 40)
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("You")
+                                    .font(.system(size: 16, weight: .medium))
+                                Text(currentUser.email)
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.gray)
+                            }
+                        }
+                    }
+                }
+                
+                ForEach(availableMembers, id: \.email) { member in
+                    Button(action: {
+                        onAssign(member.email)
+                    }) {
+                        HStack(spacing: 12) {
+                            if let profilePicture = member.profilePicture {
+                                AsyncImage(url: URL(string: profilePicture)) { image in
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                        .frame(width: 40, height: 40)
+                                        .clipShape(Circle())
+                                } placeholder: {
+                                    InitialsView(name: member.name, size: 40)
+                                }
+                            } else {
+                                InitialsView(name: member.name, size: 40)
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(member.name)
+                                    .font(.system(size: 16, weight: .medium))
+                                Text(member.email)
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.gray)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Add Team Member")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+struct TimePickerView: View {
+    @Binding var selectedDate: Date
+    @Binding var isPresented: Bool
+    
+    var body: some View {
+        NavigationView {
+            DatePicker(
+                "Select Time",
+                selection: $selectedDate,
+                displayedComponents: [.hourAndMinute]
+            )
+            .datePickerStyle(.wheel)
+            .labelsHidden()
+            .environment(\.timeZone, TimeZone(abbreviation: "UTC")!)  // Force UTC timezone
+            .navigationBarItems(
+                trailing: Button("Done") {
+                    isPresented = false
+                }
+            )
+            .padding()
+        }
     }
 }

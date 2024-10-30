@@ -18,45 +18,34 @@ struct EventView: View {
     @EnvironmentObject var authManager: AuthManager
 
     let impactMed = UIImpactFeedbackGenerator(style: .medium)
+    let impactHeavy = UIImpactFeedbackGenerator(style: .heavy)
     let notificationFeedback = UINotificationFeedbackGenerator()
 
-    private var editableTitle: String {
-        get { event.title }
-        set {
-            if let index = events.firstIndex(where: { $0.id == event.id }) {
-                events[index].title = newValue
-            }
-        }
-    }
+    @State private var currentTitle: String
 
     init(event: CalendarEvent, dayStartTime: Date, events: Binding<[CalendarEvent]>, isNewEvent: Bool = false) {
         self.event = event
         self.dayStartTime = dayStartTime
         self._events = events
         self._isEditing = State(initialValue: isNewEvent)
+        self._currentTitle = State(initialValue: event.title)
     }
     
     var body: some View {
         VStack(alignment: .leading) {
             HStack {
-                TextField("New Event", text: Binding(
-                    get: { event.title },
-                    set: { newValue in
-                        if let index = events.firstIndex(where: { $0.id == event.id }) {
-                            events[index].title = newValue
-                        }
+                TextField("New Event", text: isEditing ? $currentTitle : .constant(event.title))
+                    .foregroundColor(.white)
+                    .font(.system(size: 18))
+                    .background(Color.clear)
+                    .focused($isFocused)
+                    .onSubmit {
+                        updateEventTitle()
                     }
-                ))
-                .foregroundColor(.white)
-                .font(.system(size: 18))
-                .background(Color.clear)
-                .focused($isFocused)
-                .onSubmit {
-                    updateEventTitle()
-                }
                 Spacer()
             }
             .onTapGesture {
+                currentTitle = event.title
                 isEditing = true
                 isFocused = true
             }
@@ -103,9 +92,11 @@ struct EventView: View {
     
     private func formatEventTime(start: Date, end: Date) -> String {
         let formatter = DateFormatter()
+        formatter.timeZone = TimeZone(abbreviation: "UTC")
         
         let formatTime: (Date) -> String = { date in
-            let calendar = Calendar.current
+            var calendar = Calendar.current
+            calendar.timeZone = TimeZone(abbreviation: "UTC")!
             let minutes = calendar.component(.minute, from: date)
             if minutes == 0 {
                 formatter.dateFormat = "ha"  // Will show like "2pm"
@@ -129,41 +120,71 @@ struct EventView: View {
     }
 
     private func updateEventTitle() {
-        if let index = events.firstIndex(where: { $0.id == event.id }) {
-            if events[index].title.isEmpty {
-                Task {
-                    do {
-                        try await authManager.deleteCalendarEvent(calendarEventId: event.id.uuidString)
-                        await MainActor.run {
-                            events.remove(at: index)
-                            let impact = UIImpactFeedbackGenerator(style: .heavy)
-                            impact.impactOccurred()
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                impact.impactOccurred()
-                            }
+        print("\n=== Event Title Update ===")
+        let newTitle = currentTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        print("Updating event title to:", newTitle)
+        print("Event ID:", event.id.uuidString)
+        print("Selected Event ID:", authManager.selectedEventId ?? "nil")
+        
+        Task {
+            do {
+                print("\nSending API request to update title")
+                let updatedEvent = try await authManager.updateCalendarEvent(
+                    calendarEventId: event.id.uuidString,
+                    title: newTitle,
+                    startTime: nil,
+                    endTime: nil,
+                    color: nil
+                )
+                
+                await MainActor.run {
+                    print("\nAPI Response successful, updating state")
+                    // Update local events array
+                    if let index = events.firstIndex(where: { $0.id == event.id }) {
+                        print("\nUpdating local events array at index:", index)
+                        events[index].title = newTitle
+                    } else {
+                        print("Error: Could not find event in local events array")
+                    }
+                    
+                    // Update AuthManager state
+                    if let eventId = authManager.selectedEventId {
+                        print("\nUpdating AuthManager state for event:", eventId)
+                        authManager.updateCalendarEventInState(
+                            eventId: eventId,
+                            calendarEventId: event.id.uuidString
+                        ) { calendarEvent in
+                            print("Previous title:", calendarEvent.title)
+                            calendarEvent.title = newTitle
+                            print("New title:", calendarEvent.title)
                         }
-                    } catch {
-                        print("Failed to delete event:", error)
+                        
+                        // Force a UI refresh of the calendar view
+                        authManager.objectWillChange.send()
+                    } else {
+                        print("Error: No selected event ID in AuthManager")
                     }
+                    
+                    print("\nFinal state check:")
+                    print("Selected event calendar events:", 
+                          authManager.selectedEvent?.calendarEvents
+                            .map { "ID: \($0.id), Title: \($0.title)" }
+                            .joined(separator: "\n  ") ?? "nil")
+                    
+                    impactMed.impactOccurred(intensity: 0.5)
                 }
-            } else {
-                Task {
-                    do {
-                        _ = try await authManager.updateCalendarEvent(
-                            calendarEventId: event.id.uuidString,
-                            title: events[index].title,
-                            startTime: nil as Date?,
-                            endTime: nil as Date?,
-                            color: nil as String?
-                        )
-                    } catch {
-                        print("Failed to update event title:", error)
-                    }
+            } catch {
+                print("\nError updating event title:", error)
+                notificationFeedback.notificationOccurred(.error)
+                currentTitle = event.title
+                if let index = events.firstIndex(where: { $0.id == event.id }) {
+                    events[index].title = event.title
                 }
             }
         }
         isEditing = false
         isFocused = false
+        print("=======================\n")
     }
 
     private func snapToNearestHour(offset: CGFloat) -> CGFloat {
@@ -181,30 +202,85 @@ struct EventView: View {
         }
     }
 
+    private func formatTime(date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        formatter.timeZone = TimeZone(abbreviation: "UTC")!
+        return formatter.string(from: date).lowercased()
+    }
+
     private func updateEventTime() {
+        print("\n=== Event Time Update (Drag) ===")
+        print("Event ID:", event.id.uuidString)
+        print("Selected Event ID:", authManager.selectedEventId ?? "nil")
+        
         if let index = events.firstIndex(where: { $0.id == event.id }) {
             let minutesToAdd = Int(dragOffset / 72.0 * 60)
             let newStartTime = Calendar.current.date(byAdding: .minute, value: minutesToAdd, to: event.startTime)!
             let newEndTime = Calendar.current.date(byAdding: .minute, value: minutesToAdd, to: event.endTime)!
             
+            print("Current drag offset:", dragOffset)
+            print("Minutes to add:", minutesToAdd)
+            print("New start time:", formatTime(date: newStartTime))
+            print("New end time:", formatTime(date: newEndTime))
+            
             Task {
                 do {
-                    _ = try await authManager.updateCalendarEvent(
+                    print("\nSending API request to update times")
+                    let updatedEvent = try await authManager.updateCalendarEvent(
                         calendarEventId: event.id.uuidString,
-                        title: nil as String?,
+                        title: nil,
                         startTime: newStartTime,
                         endTime: newEndTime,
-                        color: nil as String?
+                        color: nil
                     )
+                    
                     await MainActor.run {
+                        print("\nAPI Response successful, updating state")
+                        // Update local events array
+                        print("\nUpdating local events array at index:", index)
                         events[index].startTime = newStartTime
                         events[index].endTime = newEndTime
+                        
+                        // Update AuthManager state
+                        if let eventId = authManager.selectedEventId {
+                            print("\nUpdating AuthManager state for event:", eventId)
+                            authManager.updateCalendarEventInState(
+                                eventId: eventId,
+                                calendarEventId: event.id.uuidString
+                            ) { calendarEvent in
+                                print("Previous times - Start:", formatTime(date: calendarEvent.startTime))
+                                print("Previous times - End:", formatTime(date: calendarEvent.endTime))
+                                calendarEvent.startTime = newStartTime
+                                calendarEvent.endTime = newEndTime
+                                print("New times - Start:", formatTime(date: calendarEvent.startTime))
+                                print("New times - End:", formatTime(date: calendarEvent.endTime))
+                            }
+                            
+                            // Force a UI refresh
+                            authManager.objectWillChange.send()
+                        } else {
+                            print("Error: No selected event ID in AuthManager")
+                        }
+                        
+                        print("\nFinal state check:")
+                        print("Selected event calendar events:", 
+                              authManager.selectedEvent?.calendarEvents
+                                .map { "ID: \($0.id), Start: \(formatTime(date: $0.startTime)), End: \(formatTime(date: $0.endTime))" }
+                                .joined(separator: "\n  ") ?? "nil")
+                        
+                        impactMed.impactOccurred(intensity: 0.5)
                     }
                 } catch {
-                    print("Failed to update event times:", error)
+                    print("\nError updating event times:", error)
+                    notificationFeedback.notificationOccurred(.error)
+                    // Revert times on error
+                    events[index].startTime = event.startTime
+                    events[index].endTime = event.endTime
                 }
             }
         }
+        print("=======================\n")
     }
 }
 
@@ -458,6 +534,7 @@ struct EventDetailModalView: View {
     private func formatTime(date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mm a"
+        formatter.timeZone = TimeZone(abbreviation: "UTC")!
         return formatter.string(from: date).lowercased()
     }
     
@@ -474,6 +551,13 @@ struct EventDetailModalView: View {
                     try await authManager.deleteCalendarEvent(calendarEventId: event.id.uuidString)
                     await MainActor.run {
                         events.remove(at: index)
+                        if var user = authManager.currentUser,
+                           let eventId = authManager.selectedEventId,
+                           var selectedEvent = user.events[eventId] {
+                            selectedEvent.calendarEvents.removeAll { $0.id == event.id.uuidString }
+                            user.events[eventId] = selectedEvent
+                            authManager.currentUser = user
+                        }
                         impactMed.impactOccurred()
                         presentationMode.wrappedValue.dismiss()
                     }
@@ -486,66 +570,168 @@ struct EventDetailModalView: View {
     }
     
     private func updateEventTitle() {
+        print("\n=== Event Title Update (Modal) ===")
         let newTitle = editableTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let index = events.firstIndex(where: { $0.id == event.id }) {
-            Task {
-                do {
-                    let updatedEvent = try await authManager.updateCalendarEvent(
-                        calendarEventId: event.id.uuidString,
-                        title: newTitle,
-                        startTime: nil,
-                        endTime: nil,
-                        color: nil
-                    )
-                    
-                    if let updatedTitle = updatedEvent.title {
-                        await MainActor.run {
-                            events[index].title = updatedTitle
-                            impactMed.impactOccurred(intensity: 0.5)
-                        }
+        print("Updating event title to:", newTitle)
+        print("Event ID:", event.id.uuidString)
+        print("Selected Event ID:", authManager.selectedEventId ?? "nil")
+        
+        Task {
+            do {
+                print("\nSending API request to update title")
+                let updatedEvent = try await authManager.updateCalendarEvent(
+                    calendarEventId: event.id.uuidString,
+                    title: newTitle,
+                    startTime: nil,
+                    endTime: nil,
+                    color: nil
+                )
+                
+                await MainActor.run {
+                    print("\nAPI Response successful, updating state")
+                    // Update local events array
+                    if let index = events.firstIndex(where: { $0.id == event.id }) {
+                        print("\nUpdating local events array at index:", index)
+                        events[index].title = newTitle
+                    } else {
+                        print("Error: Could not find event in local events array")
                     }
-                } catch {
-                    print("Failed to update event title:", error)
-                    notificationFeedback.notificationOccurred(.error)
+                    
+                    // Update AuthManager state
+                    if let eventId = authManager.selectedEventId {
+                        print("\nUpdating AuthManager state for event:", eventId)
+                        authManager.updateCalendarEventInState(
+                            eventId: eventId,
+                            calendarEventId: event.id.uuidString
+                        ) { calendarEvent in
+                            print("Previous title:", calendarEvent.title)
+                            calendarEvent.title = newTitle
+                            print("New title:", calendarEvent.title)
+                        }
+                        
+                        // Force a UI refresh of the calendar view
+                        authManager.objectWillChange.send()
+                    } else {
+                        print("Error: No selected event ID in AuthManager")
+                    }
+                    
+                    print("\nFinal state check:")
+                    print("Selected event calendar events:", 
+                          authManager.selectedEvent?.calendarEvents
+                            .map { "ID: \($0.id), Title: \($0.title)" }
+                            .joined(separator: "\n  ") ?? "nil")
+                    
+                    impactMed.impactOccurred(intensity: 0.5)
                 }
+            } catch {
+                print("\nError updating event title:", error)
+                notificationFeedback.notificationOccurred(.error)
+                editableTitle = event.title
             }
-            isEditingTitle = false
-            isTitleFocused = false
         }
+        isEditingTitle = false
+        isTitleFocused = false
+        print("=======================\n")
     }
     
     private func updateEventColor() {
-        if let index = events.firstIndex(where: { $0.id == event.id }) {
-            let colorString = colorToRGBString(selectedColor)
-            
-            Task {
-                do {
-                    let updatedEvent = try await authManager.updateCalendarEvent(
-                        calendarEventId: event.id.uuidString,
-                        title: nil,
-                        startTime: nil,
-                        endTime: nil,
-                        color: colorString
-                    )
-                    
-                    if let updatedColor = updatedEvent.color {
-                        await MainActor.run {
-                            let color = rgbStringToColor(updatedColor)
-                            events[index].color = color
-                            impactMed.impactOccurred()
-                        }
+        let colorString = colorToRGBString(selectedColor)
+        print("\n=== Event Color Update ===")
+        print("Updating event color to:", colorString)
+        print("Event ID:", event.id.uuidString)
+        print("Selected Event ID:", authManager.selectedEventId ?? "nil")
+        
+        Task {
+            do {
+                let updatedEvent = try await authManager.updateCalendarEvent(
+                    calendarEventId: event.id.uuidString,
+                    title: nil,
+                    startTime: nil,
+                    endTime: nil,
+                    color: colorString
+                )
+                
+                print("\nAPI Response:")
+                print("Updated color:", updatedEvent.color ?? "nil")
+                
+                await MainActor.run {
+                    // Update local events array
+                    if let index = events.firstIndex(where: { $0.id == event.id }) {
+                        print("\nUpdating local events array at index:", index)
+                        events[index].color = selectedColor
+                    } else {
+                        print("Error: Could not find event in local events array")
                     }
-                } catch {
-                    print("Failed to update event color:", error)
-                    notificationFeedback.notificationOccurred(.error)
+                    
+                    // Update the state in AuthManager
+                    if let eventId = authManager.selectedEventId {
+                        print("\nUpdating AuthManager state for event:", eventId)
+                        authManager.updateCalendarEventInState(
+                            eventId: eventId,
+                            calendarEventId: event.id.uuidString
+                        ) { calendarEvent in
+                            print("Previous color:", calendarEvent.color)
+                            calendarEvent.color = colorString
+                            print("New color:", calendarEvent.color)
+                        }
+                        
+                        // Force a UI refresh of the calendar view
+                        authManager.objectWillChange.send()
+                    } else {
+                        print("Error: No selected event ID in AuthManager")
+                    }
+                    
+                    print("\nFinal state check:")
+                    print("Selected event calendar events:", 
+                          authManager.selectedEvent?.calendarEvents
+                            .map { "ID: \($0.id), Color: \($0.color)" }
+                            .joined(separator: "\n  ") ?? "nil")
+                    
+                    impactMed.impactOccurred()
                 }
+            } catch {
+                print("\nError updating event color:", error)
+                notificationFeedback.notificationOccurred(.error)
+                selectedColor = event.color
             }
         }
+        print("=======================\n")
+    }
+    
+    private func colorToRGBString(_ color: Color) -> String {
+        let uiColor = UIColor(color)
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        
+        uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        
+        return "\(Int(red * 255)),\(Int(green * 255)),\(Int(blue * 255))"
+    }
+    
+    private func rgbStringToColor(_ rgb: String) -> Color {
+        let components = rgb.split(separator: ",").map { Int($0) ?? 0 }
+        guard components.count >= 3 else { return .gray }
+        
+        return Color(
+            red: CGFloat(components[0]) / 255.0,
+            green: CGFloat(components[1]) / 255.0,
+            blue: CGFloat(components[2]) / 255.0
+        )
     }
     
     private func updateEventTimes() {
+        print("\n=== Event Time Update ===")
+        print("Updating event times:")
+        print("Event ID:", event.id.uuidString)
+        print("Selected Event ID:", authManager.selectedEventId ?? "nil")
+        print("Current Start Time:", formatTime(date: currentStartTime))
+        print("Current End Time:", formatTime(date: currentEndTime))
+        
         if let index = events.firstIndex(where: { $0.id == event.id }) {
             if currentEndTime <= currentStartTime {
+                print("Error: End time must be after start time")
                 notificationFeedback.notificationOccurred(.error)
                 currentStartTime = events[index].startTime
                 currentEndTime = events[index].endTime
@@ -559,6 +745,7 @@ struct EventDetailModalView: View {
             }
             
             if wouldOverlap {
+                print("Error: Time range would overlap with another event")
                 notificationFeedback.notificationOccurred(.error)
                 currentStartTime = events[index].startTime
                 currentEndTime = events[index].endTime
@@ -567,6 +754,7 @@ struct EventDetailModalView: View {
             
             Task {
                 do {
+                    print("\nSending API request to update times")
                     let updatedEvent = try await authManager.updateCalendarEvent(
                         calendarEventId: event.id.uuidString,
                         title: nil,
@@ -575,46 +763,49 @@ struct EventDetailModalView: View {
                         color: nil
                     )
                     
-                    if let newStartTime = updatedEvent.startTime,
-                       let newEndTime = updatedEvent.endTime {
-                        await MainActor.run {
-                            events[index].startTime = newStartTime
-                            events[index].endTime = newEndTime
-                            impactMed.impactOccurred(intensity: 0.5)
+                    await MainActor.run {
+                        print("\nAPI Response successful, updating state")
+                        // Update local events array
+                        events[index].startTime = currentStartTime
+                        events[index].endTime = currentEndTime
+                        
+                        // Update AuthManager state
+                        if let eventId = authManager.selectedEventId {
+                            print("\nUpdating AuthManager state for event:", eventId)
+                            authManager.updateCalendarEventInState(
+                                eventId: eventId,
+                                calendarEventId: event.id.uuidString
+                            ) { calendarEvent in
+                                print("Previous times - Start:", formatTime(date: calendarEvent.startTime), "End:", formatTime(date: calendarEvent.endTime))
+                                calendarEvent.startTime = currentStartTime
+                                calendarEvent.endTime = currentEndTime
+                                print("New times - Start:", formatTime(date: calendarEvent.startTime), "End:", formatTime(date: calendarEvent.endTime))
+                            }
+                            
+                            // Force a UI refresh of the calendar view
+                            authManager.objectWillChange.send()
                         }
+                        
+                        print("\nFinal state check:")
+                        if let selectedEvent = authManager.selectedEvent {
+                            print("Selected event calendar events:")
+                            for calEvent in selectedEvent.calendarEvents {
+                                print("ID: \(calEvent.id)")
+                                print("  Start: \(formatTime(date: calEvent.startTime))")
+                                print("  End: \(formatTime(date: calEvent.endTime))")
+                            }
+                        }
+                        
+                        impactMed.impactOccurred(intensity: 0.5)
                     }
                 } catch {
-                    print("Failed to update event times:", error)
-                    await MainActor.run {
-                        currentStartTime = events[index].startTime
-                        currentEndTime = events[index].endTime
-                        notificationFeedback.notificationOccurred(.error)
-                    }
+                    print("\nError updating event times:", error)
+                    notificationFeedback.notificationOccurred(.error)
+                    currentStartTime = events[index].startTime
+                    currentEndTime = events[index].endTime
                 }
             }
         }
-    }
-}
-
-struct TimePickerView: View {
-    @Binding var selectedDate: Date
-    @Binding var isPresented: Bool
-    
-    var body: some View {
-        NavigationView {
-            DatePicker(
-                "Select Time",
-                selection: $selectedDate,
-                displayedComponents: [.hourAndMinute]
-            )
-            .datePickerStyle(.wheel)
-            .labelsHidden()
-            .navigationBarItems(
-                trailing: Button("Done") {
-                    isPresented = false
-                }
-            )
-            .padding()
-        }
+        print("=======================\n")
     }
 }

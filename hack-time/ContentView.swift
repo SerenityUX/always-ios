@@ -9,52 +9,36 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var authManager = AuthManager()
-     
+    @State private var initialEvents: [CalendarEvent] = []
+    
     var body: some View {
         Group {
             if authManager.isAuthenticated {
-                if let firstEvent = authManager.currentUser?.events.first?.value {
-                    MainContentView(initialEvents: firstEvent.calendar_events.compactMap { calendarEvent in
-                        guard let uuid = UUID(uuidString: calendarEvent.id) else { return nil }
-                        let color = rgbStringToColor(calendarEvent.color)
+                if let event = authManager.selectedEvent {
+                    // Convert APICalendarEvents to CalendarEvents
+                    let calendarEvents = event.calendarEvents.map { apiEvent in
+                        let color = apiEvent.color.split(separator: ",").map { Int($0) ?? 0 }
                         return CalendarEvent(
-                            id: uuid,
-                            title: calendarEvent.title,
-                            startTime: calendarEvent.startTime,
-                            endTime: calendarEvent.endTime,
-                            color: color
+                            id: UUID(uuidString: apiEvent.id) ?? UUID(),
+                            title: apiEvent.title,
+                            startTime: apiEvent.startTime,
+                            endTime: apiEvent.endTime,
+                            color: Color(
+                                red: CGFloat(color[0])/255.0,
+                                green: CGFloat(color[1])/255.0,
+                                blue: CGFloat(color[2])/255.0
+                            )
                         )
-                    })
+                    }
+                    MainContentView(initialEvents: calendarEvents)
+                        .environmentObject(authManager)
                 } else {
                     MainContentView()
+                        .environmentObject(authManager)
                 }
             } else {
-                OnboardingView()
-            }
-        }
-        .environmentObject(authManager)
-        .onAppear {
-            checkAuth()
-        }
-    }
-    
-    private func checkAuth() {
-        guard let token = UserDefaults.standard.string(forKey: "authToken") else {
-            authManager.isAuthenticated = false
-            return
-        }
-        
-        Task {
-            do {
-                _ = try await authManager.validateToken(token)
-                await MainActor.run {
-                    authManager.isAuthenticated = true
-                }
-            } catch {
-                await MainActor.run {
-                    authManager.isAuthenticated = false
-                    UserDefaults.standard.removeObject(forKey: "authToken")
-                }
+                LoginView()
+                    .environmentObject(authManager)
             }
         }
     }

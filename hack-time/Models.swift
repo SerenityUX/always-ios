@@ -46,7 +46,9 @@ struct Event: Codable {
     let id: String
     let title: String
     let owner: String
-    let calendar_events: [APICalendarEvent]
+    let startTime: Date
+    let endTime: Date
+    var calendarEvents: [APICalendarEvent]
     let teamMembers: [TeamMember]
     var tasks: [EventTask]
     
@@ -54,9 +56,19 @@ struct Event: Codable {
         case id
         case title
         case owner
-        case calendar_events = "calendar_events"
+        case startTime
+        case endTime
+        case calendarEvents = "calendar_events"
         case teamMembers
         case tasks
+    }
+    
+    func tasksForUser(email: String) -> [EventTask] {
+        return tasks.filter { task in
+            task.assignedTo.contains { member in
+                member.email == email
+            }
+        }
     }
 }
 
@@ -84,11 +96,11 @@ struct CalendarEvent: Identifiable {
 }
 
 struct APICalendarEvent: Codable {
-    let id: String
-    let title: String
-    let startTime: Date
-    let endTime: Date
-    let color: String
+    var id: String
+    var title: String
+    var startTime: Date
+    var endTime: Date
+    var color: String
 }
 
 struct APICalendarEventResponse: Codable {
@@ -195,15 +207,4 @@ struct AssignedUser: Codable {
     let name: String
     let profilePicture: String?
     let email: String
-}
-
-// Add this extension to Event
-extension Event {
-    func tasksForUser(email: String) -> [EventTask] {
-        return tasks.filter { task in
-            task.assignedTo.contains { member in
-                member.email == email
-            }
-        }
-    }
 }

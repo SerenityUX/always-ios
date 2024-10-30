@@ -18,6 +18,7 @@
 		43ACD8552CD18FB4007EEF94 /* MediaUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43ACD8542CD18FB4007EEF94 /* MediaUtils.swift */; };
 		43ACD8572CD18FBF007EEF94 /* ViewModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43ACD8562CD18FBF007EEF94 /* ViewModels.swift */; };
 		43ACD8592CD18FCA007EEF94 /* Utilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43ACD8582CD18FCA007EEF94 /* Utilities.swift */; };
+		43ACD85B2CD29348007EEF94 /* TaskViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43ACD85A2CD29348007EEF94 /* TaskViews.swift */; };
 		43F24FCF2CCB0074007A476B /* hack_timeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43F24FCE2CCB0074007A476B /* hack_timeApp.swift */; };
 		43F24FD12CCB0074007A476B /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43F24FD02CCB0074007A476B /* ContentView.swift */; };
 		43F24FD32CCB0075007A476B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 43F24FD22CCB0075007A476B /* Assets.xcassets */; };
@@ -36,6 +37,7 @@
 		43ACD8542CD18FB4007EEF94 /* MediaUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaUtils.swift; sourceTree = "<group>"; };
 		43ACD8562CD18FBF007EEF94 /* ViewModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModels.swift; sourceTree = "<group>"; };
 		43ACD8582CD18FCA007EEF94 /* Utilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Utilities.swift; sourceTree = "<group>"; };
+		43ACD85A2CD29348007EEF94 /* TaskViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskViews.swift; sourceTree = "<group>"; };
 		43F24FCB2CCB0074007A476B /* hack-time.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "hack-time.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		43F24FCE2CCB0074007A476B /* hack_timeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = hack_timeApp.swift; sourceTree = "<group>"; };
 		43F24FD02CCB0074007A476B /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -81,6 +83,7 @@
 				43ACD84E2CD18F8C007EEF94 /* ProfileViews.swift */,
 				43ACD8502CD18F98007EEF94 /* AnnouncementView.swift */,
 				43ACD8522CD18FA3007EEF94 /* MainContentView.swift */,
+				43ACD85A2CD29348007EEF94 /* TaskViews.swift */,
 				43ACD8542CD18FB4007EEF94 /* MediaUtils.swift */,
 				43ACD8562CD18FBF007EEF94 /* ViewModels.swift */,
 				43ACD8582CD18FCA007EEF94 /* Utilities.swift */,
@@ -172,6 +175,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				43ACD8552CD18FB4007EEF94 /* MediaUtils.swift in Sources */,
+				43ACD85B2CD29348007EEF94 /* TaskViews.swift in Sources */,
 				43ACD8472CD18F52007EEF94 /* Models.swift in Sources */,
 				43ACD8492CD18F67007EEF94 /* AuthManager.swift in Sources */,
 				43ACD84F2CD18F8C007EEF94 /* ProfileViews.swift in Sources */,
