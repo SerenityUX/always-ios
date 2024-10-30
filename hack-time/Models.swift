@@ -155,10 +155,10 @@ struct ErrorResponse: Codable {
 
 struct EventTask: Codable {
     let id: String
-    let title: String
-    let description: String
-    let startTime: Date
-    let endTime: Date
+    var title: String
+    var description: String
+    var startTime: Date
+    var endTime: Date
     let assignedTo: [AssignedUser]
     
     enum CodingKeys: String, CodingKey {

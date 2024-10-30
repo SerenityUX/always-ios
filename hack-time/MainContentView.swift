@@ -124,6 +124,10 @@ struct MainContentView: View {
     @State private var taskPreviewStart: Date?
     @State private var taskPreviewEnd: Date?
     
+    @State private var editingTaskId: String?
+    @State private var editingTaskTitle: String = ""
+    @FocusState private var isTaskTitleFocused: Bool
+    
     init(initialEvents: [CalendarEvent] = []) {
         let calendar = Calendar.current
         let now = Date()
@@ -385,40 +389,30 @@ struct MainContentView: View {
                     // Events layer (move to front)
                     if showEvents {
                         ForEach(tags, id: \.self) { tag in
-                            if tag == "Event" {
-                                // Events view
-                                ForEach(filteredEvents.indices, id: \.self) { index in
-                                    EventView(event: filteredEvents[index], dayStartTime: startTime, events: $events, isNewEvent: filteredEvents[index].id == newEventId)
-                                        .padding(.leading, 42)
-                                        .offset(y: calculateEventOffset(for: filteredEvents[index]))
-                                        .offset(x: selectedTag == "Event" ? eventOffset : (
-                                            tags.firstIndex(of: "Event")! < tags.firstIndex(of: selectedTag)! ? 
-                                            -UIScreen.main.bounds.width : UIScreen.main.bounds.width
-                                        ))
-                                        .animation(.spring(), value: eventOffset)
-                                        .onTapGesture {
-                                            selectedEvent = filteredEvents[index]
-                                        }
-                                        .zIndex(1)
-                                }
-                            } else {
-                                // Tasks view for each tag
-                                let tasks = tag == "You" ? 
-                                    getFilteredTasks(forEmail: authManager.currentUser?.email) :
-                                    getFilteredTasks(forEmail: currentEvent?.teamMembers.first(where: { $0.name == tag })?.email)
-                                
-                                ForEach(tasks ?? [], id: \.id) { task in
-                                    TaskTimelineView(task: task, dayStartTime: startTime)
-                                        .frame(width: 362)
-                                        .padding(.leading, 42)
-                                        .padding(.trailing, 16)
-                                        .offset(y: calculateRoundedOffset(startTime: task.startTime))
-                                        .offset(x: selectedTag == tag ? taskOffset : (
-                                            tags.firstIndex(of: tag)! < tags.firstIndex(of: selectedTag)! ? 
-                                            -UIScreen.main.bounds.width : UIScreen.main.bounds.width
-                                        ))
-                                        .animation(.spring(), value: taskOffset)
-                                        .zIndex(1)
+                            Group {
+                                if tag == "Event" {
+                                    // Events view
+                                    ForEach(filteredEvents.indices, id: \.self) { index in
+                                        EventView(event: filteredEvents[index], dayStartTime: startTime, events: $events, isNewEvent: filteredEvents[index].id == newEventId)
+                                            .padding(.leading, 42)
+                                            .offset(y: calculateEventOffset(for: filteredEvents[index]))
+                                            .offset(x: selectedTag == "Event" ? eventOffset : (
+                                                tags.firstIndex(of: "Event")! < tags.firstIndex(of: selectedTag)! ? 
+                                                -UIScreen.main.bounds.width : UIScreen.main.bounds.width
+                                            ))
+                                            .animation(.spring(), value: eventOffset)
+                                            .onTapGesture {
+                                                selectedEvent = filteredEvents[index]
+                                            }
+                                            .zIndex(1)
+                                    }
+                                } else {
+                                    // Tasks view for each tag
+                                    let tasks = getTasksForTag(tag: tag)
+                                    
+                                    ForEach(tasks ?? [], id: \.id) { task in
+                                        createTaskView(task: task, tag: tag)
+                                    }
                                 }
                             }
                         }
@@ -768,6 +762,122 @@ struct MainContentView: View {
             }
         }
     }
+
+    private func updateTaskTitle(task: EventTask) {
+        let newTitle = editingTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        Task {
+            do {
+                let updatedTask = try await authManager.updateEventTask(
+                    taskId: task.id,
+                    title: newTitle
+                )
+                
+                await MainActor.run {
+                    if var user = authManager.currentUser,
+                       let eventId = user.events.first?.key,
+                       var event = user.events[eventId],
+                       let taskIndex = event.tasks.firstIndex(where: { $0.id == task.id }) {
+                        event.tasks[taskIndex].title = newTitle
+                        user.events[eventId] = event
+                        authManager.currentUser = user
+                    }
+                    let impact = UIImpactFeedbackGenerator(style: .medium)
+                    impact.impactOccurred(intensity: 0.5)
+                }
+            } catch {
+                print("Failed to update task title:", error)
+                editingTaskTitle = task.title // Revert on failure
+                let notification = UINotificationFeedbackGenerator()
+                notification.notificationOccurred(.error)
+            }
+        }
+        
+        editingTaskId = nil
+        isTaskTitleFocused = false
+    }
+
+    private func getTasksForTag(tag: String) -> [EventTask]? {
+        if tag == "You" {
+            return getFilteredTasks(forEmail: authManager.currentUser?.email)
+        } else {
+            return getFilteredTasks(forEmail: currentEvent?.teamMembers.first(where: { $0.name == tag })?.email)
+        }
+    }
+
+    struct TaskViewModifier: ViewModifier {
+        let tag: String
+        let selectedTag: String
+        let taskOffset: CGFloat
+        let tags: [String]
+        let task: EventTask
+        let startTime: Date
+        
+        func body(content: Content) -> some View {
+            content
+                .frame(width: 362)
+                .padding(.leading, 42)
+                .padding(.trailing, 16)
+                .offset(y: calculateOffset())
+                .offset(x: calculateHorizontalOffset())
+                .animation(.spring(), value: taskOffset)
+                .zIndex(1)
+        }
+        
+        private func calculateOffset() -> CGFloat {
+            let calendar = Calendar.current
+            let components = calendar.dateComponents([.year, .month, .day, .hour], from: task.startTime)
+            let roundedStartTime = calendar.date(from: components) ?? task.startTime
+            let hoursDifference = calendar.dateComponents([.hour], from: startTime, to: roundedStartTime).hour ?? 0
+            return CGFloat(hoursDifference) * 72.0
+        }
+        
+        private func calculateHorizontalOffset() -> CGFloat {
+            if selectedTag == tag {
+                return taskOffset
+            }
+            if let selectedIndex = tags.firstIndex(of: selectedTag),
+               let tagIndex = tags.firstIndex(of: tag) {
+                return tagIndex < selectedIndex ? -UIScreen.main.bounds.width : UIScreen.main.bounds.width
+            }
+            return 0
+        }
+    }
+
+    // First, add this helper function to handle task view creation
+    private func createTaskView(task: EventTask, tag: String) -> some View {
+        TaskTimelineView(
+            task: task, 
+            dayStartTime: startTime,
+            isEditing: editingTaskId == task.id,
+            editableTitle: Binding(
+                get: { editingTaskId == task.id ? editingTaskTitle : task.title },
+                set: { editingTaskTitle = $0 }
+            ),
+            isTitleFocused: _isTaskTitleFocused,
+            onTitleTap: {
+                editingTaskId = task.id
+                editingTaskTitle = task.title
+                isTaskTitleFocused = true
+            },
+            onTitleSubmit: {
+                updateTaskTitle(task: task)
+            }
+        )
+        .modifier(TaskViewModifier(
+            tag: tag,
+            selectedTag: selectedTag,
+            taskOffset: taskOffset,
+            tags: tags,
+            task: task,
+            startTime: startTime
+        ))
+        .onChange(of: isTaskTitleFocused) { focused in
+            if !focused && editingTaskId == task.id {
+                updateTaskTitle(task: task)
+            }
+        }
+    }
 }
 
 struct TaskView: View {
@@ -848,6 +958,11 @@ struct InitialsView: View {
 struct TaskTimelineView: View {
     let task: EventTask
     let dayStartTime: Date
+    let isEditing: Bool
+    @Binding var editableTitle: String
+    @FocusState var isTitleFocused: Bool
+    let onTitleTap: () -> Void
+    let onTitleSubmit: () -> Void
     
     private var roundedStartTime: Date {
         let calendar = Calendar.current
@@ -875,6 +990,10 @@ struct TaskTimelineView: View {
         return max(minHeight - 16, calculatedHeight)
     }
     
+    private var isOneHourOrLess: Bool {
+        duration <= 3600 // 1 hour or less
+    }
+    
     private func formatEventTime(start: Date, end: Date) -> String {
         let formatter = DateFormatter()
         
@@ -894,23 +1013,23 @@ struct TaskTimelineView: View {
         return "\(startString) - \(endString)"
     }
     
-    private var shouldShowAssignees: Bool {
-        duration > 3600 // More than 1 hour
-    }
-    
-    private var isOneHourOrLess: Bool {
-        duration <= 3600 // 1 hour or less
-    }
-    
     var body: some View {
         if isOneHourOrLess {
-            // One hour or less layout
             HStack(spacing: 0) {
-                Text(task.title)
-                    .font(.system(size: 18))
-                    .foregroundColor(.black)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                if isEditing {
+                    TextField("Task Title", text: $editableTitle)
+                        .foregroundColor(.black)
+                        .font(.system(size: 18))
+                        .focused($isTitleFocused)
+                        .onSubmit(onTitleSubmit)
+                } else {
+                    Text(task.title)
+                        .font(.system(size: 18))
+                        .foregroundColor(.black)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .onTapGesture(perform: onTitleTap)
+                }
                 
                 Spacer()
                 
@@ -939,21 +1058,24 @@ struct TaskTimelineView: View {
                     .stroke(Color.black, lineWidth: 1)
             )
             .padding(.vertical, 8)
-            .padding(.leading, 16)
         } else {
-            // Existing layout for longer events
             VStack(alignment: .leading, spacing: 8) {
-                HStack {
+                if isEditing {
+                    TextField("Task Title", text: $editableTitle)
+                        .font(.system(size: 18))
+                        .foregroundColor(.black)
+                        .focused($isTitleFocused)
+                        .onSubmit(onTitleSubmit)
+                } else {
                     Text(task.title)
                         .font(.system(size: 18))
                         .foregroundColor(.black)
-                    Spacer()
+                        .onTapGesture(perform: onTitleTap)
                 }
                 
                 Spacer()
                 
                 HStack(alignment: .bottom) {
-
                     Text(formatEventTime(start: task.startTime, end: task.endTime))
                         .foregroundColor(.black.opacity(0.6))
                         .font(.system(size: 14))
@@ -979,7 +1101,6 @@ struct TaskTimelineView: View {
                     .stroke(Color.black, lineWidth: 1)
             )
             .padding(.vertical, 8)
-            .padding(.leading, 16)
         }
     }
 }

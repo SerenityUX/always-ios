@@ -397,8 +397,8 @@ class AuthManager: ObservableObject {
         
         if let title = title { body["title"] = title }
         if let description = description { body["description"] = description }
-        if let startTime = startTime { body["startTime"] = startTime }
-        if let endTime = endTime { body["endTime"] = endTime }
+        if let startTime = startTime { body["startTime"] = formatDate(startTime) }
+        if let endTime = endTime { body["endTime"] = formatDate(endTime) }
         
         let url = URL(string: "\(baseURL)/editEventTask")!
         var request = URLRequest(url: url)
@@ -412,8 +412,7 @@ class AuthManager: ObservableObject {
             throw AuthError.serverError
         }
         
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        let decoder = createDecoder()
         return try decoder.decode(EventTask.self, from: data)
     }
 }
