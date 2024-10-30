@@ -389,22 +389,22 @@ class AuthManager: ObservableObject {
         startTime: Date? = nil,
         endTime: Date? = nil
     ) async throws -> EventTask {
-        guard let token = currentUser?.token else {
+        guard let token = UserDefaults.standard.string(forKey: "authToken") else {
             throw AuthError.invalidToken
         }
-        
-        var body: [String: Any] = ["token": token, "taskId": taskId]
-        
-        if let title = title { body["title"] = title }
-        if let description = description { body["description"] = description }
-        if let startTime = startTime { body["startTime"] = formatDate(startTime) }
-        if let endTime = endTime { body["endTime"] = formatDate(endTime) }
         
         let url = URL(string: "\(baseURL)/editEventTask")!
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        
+        var parameters: [String: Any] = ["token": token, "taskId": taskId]
+        if let title = title { parameters["title"] = title }
+        if let description = description { parameters["description"] = description }
+        if let startTime = startTime { parameters["startTime"] = formatDate(startTime) }
+        if let endTime = endTime { parameters["endTime"] = formatDate(endTime) }
+        
+        request.httpBody = try? JSONSerialization.data(withJSONObject: parameters)
         
         let (data, _) = try await URLSession.shared.data(for: request)
         
@@ -412,7 +412,28 @@ class AuthManager: ObservableObject {
             throw AuthError.serverError
         }
         
+        // Use the custom decoder that handles different date formats
         let decoder = createDecoder()
         return try decoder.decode(EventTask.self, from: data)
+    }
+
+    func deleteEventTask(taskId: String) async throws {
+        guard let token = UserDefaults.standard.string(forKey: "authToken") else {
+            throw AuthError.invalidToken
+        }
+        
+        let url = URL(string: "\(baseURL)/deleteEventTask")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let parameters = ["token": token, "taskId": taskId]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: parameters)
+        
+        let (data, _) = try await URLSession.shared.data(for: request)
+        
+        if let errorResponse = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
+            throw AuthError.serverError
+        }
     }
 }

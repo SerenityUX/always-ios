@@ -963,6 +963,8 @@ struct TaskTimelineView: View {
     @FocusState var isTitleFocused: Bool
     let onTitleTap: () -> Void
     let onTitleSubmit: () -> Void
+    @State private var showTaskDetail = false
+    @EnvironmentObject var authManager: AuthManager
     
     private var roundedStartTime: Date {
         let calendar = Calendar.current
@@ -1058,6 +1060,14 @@ struct TaskTimelineView: View {
                     .stroke(Color.black, lineWidth: 1)
             )
             .padding(.vertical, 8)
+            .onTapGesture {
+                showTaskDetail = true
+            }
+            .sheet(isPresented: $showTaskDetail) {
+                TaskDetailModalView(task: task, currentUser: $authManager.currentUser)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
         } else {
             VStack(alignment: .leading, spacing: 8) {
                 if isEditing {
@@ -1101,6 +1111,14 @@ struct TaskTimelineView: View {
                     .stroke(Color.black, lineWidth: 1)
             )
             .padding(.vertical, 8)
+            .onTapGesture {
+                showTaskDetail = true
+            }
+            .sheet(isPresented: $showTaskDetail) {
+                TaskDetailModalView(task: task, currentUser: $authManager.currentUser)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
         }
     }
 }
@@ -1150,5 +1168,323 @@ struct TaskPreviewView: View {
         let hours = CGFloat(components.hour ?? 0)
         let minutes = CGFloat(components.minute ?? 0)
         return (hours + minutes / 60) * 72.0 - 16
+    }
+}
+
+struct TaskDetailModalView: View {
+    @State private var editableTitle: String
+    @State private var editableDescription: String
+    @State private var isEditingTitle: Bool = false
+    @State private var isEditingDescription: Bool = false
+    @FocusState private var isTitleFocused: Bool
+    @FocusState private var isDescriptionFocused: Bool
+    
+    @State private var currentStartTime: Date
+    @State private var currentEndTime: Date
+    @State private var isEditingStartTime: Bool = false
+    @State private var isEditingEndTime: Bool = false
+    
+    let task: EventTask
+    @Binding var currentUser: User?
+    @Environment(\.presentationMode) var presentationMode
+    @EnvironmentObject var authManager: AuthManager
+    
+    @State private var showDeleteConfirmation = false
+    
+    let impactMed = UIImpactFeedbackGenerator(style: .medium)
+    let notificationFeedback = UINotificationFeedbackGenerator()
+    
+    init(task: EventTask, currentUser: Binding<User?>) {
+        self.task = task
+        self._currentUser = currentUser
+        self._editableTitle = State(initialValue: task.title)
+        self._editableDescription = State(initialValue: task.description)
+        self._currentStartTime = State(initialValue: task.startTime)
+        self._currentEndTime = State(initialValue: task.endTime)
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                if isEditingTitle {
+                    TextField("Task Title", text: $editableTitle)
+                        .font(.system(size: 24))
+                        .focused($isTitleFocused)
+                        .onSubmit {
+                            updateTaskTitle()
+                        }
+                        .submitLabel(.done)
+                } else {
+                    Text(editableTitle)
+                        .font(.system(size: 24))
+                        .onTapGesture {
+                            isEditingTitle = true
+                            isTitleFocused = true
+                        }
+                }
+                
+                Spacer()
+                
+                Button(action: {
+                    showDeleteConfirmation = true
+                }) {
+                    Image(systemName: "trash")
+                        .foregroundColor(.red)
+                }
+            }
+            .padding()
+            
+            Divider()
+            
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    // Time section
+                    HStack {
+                        Image(systemName: "clock.fill")
+                            .foregroundColor(Color(red: 89/255, green: 99/255, blue: 110/255))
+                        
+                        HStack(spacing: 4) {
+                            Button(action: {
+                                isEditingStartTime = true
+                            }) {
+                                Text(formatTime(date: currentStartTime))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color(UIColor.systemGray6))
+                                    .cornerRadius(6)
+                            }
+                            
+                            Text("-")
+                            
+                            Button(action: {
+                                isEditingEndTime = true
+                            }) {
+                                Text(formatTime(date: currentEndTime))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color(UIColor.systemGray6))
+                                    .cornerRadius(6)
+                            }
+                        }
+                        .foregroundColor(.primary)
+                    }
+                    .padding(.horizontal)
+                    
+                    // Calendar section
+                    HStack {
+                        Image(systemName: "calendar")
+                            .foregroundColor(Color(red: 89/255, green: 99/255, blue: 110/255))
+                        Text(formatEventDate(date: task.startTime))
+                    }
+                    .padding(.horizontal)
+                    
+                    // Description section
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Description")
+                            .font(.headline)
+                        
+                        TextEditor(text: $editableDescription)
+                            .frame(height: 200)
+                            .padding(8)
+                            .background(Color.white)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color(UIColor.systemGray3), lineWidth: 1)
+                            )
+                            .focused($isDescriptionFocused)
+                            .onChange(of: isDescriptionFocused) { focused in
+                                if !focused {
+                                    updateTaskDescription()
+                                }
+                            }
+                    }
+                    .padding(.horizontal)
+                    
+                    // Assignees section
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Assigned to")
+                            .font(.headline)
+                        
+                        HStack {
+                            ForEach(task.assignedTo, id: \.email) { user in
+                                TaskAssigneeView(user: user)
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.white, lineWidth: 2)
+                                    )
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+                .padding(.vertical)
+            }
+        }
+        .background(Color(UIColor.systemBackground))
+        .sheet(isPresented: $isEditingStartTime) {
+            TimePickerView(
+                selectedDate: $currentStartTime,
+                isPresented: $isEditingStartTime
+            )
+            .presentationDetents([.height(300)])
+            .onDisappear {
+                updateTaskTimes()
+            }
+        }
+        .sheet(isPresented: $isEditingEndTime) {
+            TimePickerView(
+                selectedDate: $currentEndTime,
+                isPresented: $isEditingEndTime
+            )
+            .presentationDetents([.height(300)])
+            .onDisappear {
+                updateTaskTimes()
+            }
+        }
+        .alert(isPresented: $showDeleteConfirmation) {
+            Alert(
+                title: Text("Delete Task"),
+                message: Text("Are you sure you want to delete this task?"),
+                primaryButton: .destructive(Text("Delete")) {
+                    deleteTask()
+                },
+                secondaryButton: .cancel()
+            )
+        }
+        .onChange(of: isTitleFocused) { focused in
+            if !focused {
+                updateTaskTitle()
+            }
+        }
+        .onChange(of: isDescriptionFocused) { focused in
+            if !focused {
+                updateTaskDescription()
+            }
+        }
+    }
+    
+    private func formatTime(date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return formatter.string(from: date).lowercased()
+    }
+    
+    private func updateTaskTitle() {
+        Task {
+            do {
+                let updatedTask = try await authManager.updateEventTask(
+                    taskId: task.id,
+                    title: editableTitle,
+                    description: nil,
+                    startTime: nil,
+                    endTime: nil
+                )
+                
+                await MainActor.run {
+                    updateLocalTask(updatedTask)
+                    impactMed.impactOccurred(intensity: 0.5)
+                }
+            } catch {
+                print("Failed to update task title:", error)
+                notificationFeedback.notificationOccurred(.error)
+            }
+        }
+        isEditingTitle = false
+        isTitleFocused = false
+    }
+    
+    private func updateTaskDescription() {
+        Task {
+            do {
+                let updatedTask = try await authManager.updateEventTask(
+                    taskId: task.id,
+                    title: nil,
+                    description: editableDescription,
+                    startTime: nil,
+                    endTime: nil
+                )
+                
+                await MainActor.run {
+                    updateLocalTask(updatedTask)
+                    impactMed.impactOccurred(intensity: 0.5)
+                }
+            } catch {
+                print("Failed to update task description:", error)
+                notificationFeedback.notificationOccurred(.error)
+            }
+        }
+        isEditingDescription = false
+        isDescriptionFocused = false
+    }
+    
+    private func updateTaskTimes() {
+        if currentEndTime <= currentStartTime {
+            notificationFeedback.notificationOccurred(.error)
+            currentStartTime = task.startTime
+            currentEndTime = task.endTime
+            return
+        }
+        
+        Task {
+            do {
+                let updatedTask = try await authManager.updateEventTask(
+                    taskId: task.id,
+                    title: nil,
+                    description: nil,
+                    startTime: currentStartTime,
+                    endTime: currentEndTime
+                )
+                
+                await MainActor.run {
+                    updateLocalTask(updatedTask)
+                    impactMed.impactOccurred(intensity: 0.5)
+                }
+            } catch {
+                print("Failed to update task times:", error)
+                currentStartTime = task.startTime
+                currentEndTime = task.endTime
+                notificationFeedback.notificationOccurred(.error)
+            }
+        }
+    }
+    
+    private func deleteTask() {
+        Task {
+            do {
+                try await authManager.deleteEventTask(taskId: task.id)
+                await MainActor.run {
+                    if var user = currentUser,
+                       let eventId = user.events.first?.key,
+                       var event = user.events[eventId] {
+                        event.tasks.removeAll { $0.id == task.id }
+                        user.events[eventId] = event
+                        currentUser = user
+                        impactMed.impactOccurred()
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                }
+            } catch {
+                print("Failed to delete task:", error)
+                notificationFeedback.notificationOccurred(.error)
+            }
+        }
+    }
+    
+    private func updateLocalTask(_ updatedTask: EventTask) {
+        if var user = currentUser,
+           let eventId = user.events.first?.key,
+           var event = user.events[eventId],
+           let taskIndex = event.tasks.firstIndex(where: { $0.id == task.id }) {
+            event.tasks[taskIndex] = updatedTask
+            user.events[eventId] = event
+            currentUser = user
+        }
+    }
+
+    // Add this helper function to TaskDetailModalView
+    private func formatEventDate(date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, MMMM d, yyyy"
+        return formatter.string(from: date)
     }
 }
