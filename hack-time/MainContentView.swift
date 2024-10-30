@@ -120,6 +120,10 @@ struct MainContentView: View {
     
     @State private var proxy: ScrollViewProxy?
     
+    @State private var isCreatingTask: Bool = false
+    @State private var taskPreviewStart: Date?
+    @State private var taskPreviewEnd: Date?
+    
     init(initialEvents: [CalendarEvent] = []) {
         let calendar = Calendar.current
         let now = Date()
@@ -234,11 +238,120 @@ struct MainContentView: View {
                 Text("it's hack time you hacker...")
                     .foregroundColor(Color(red: 0.0, green: 0.0, blue: 0.0, opacity: 0.0))
                     .frame(height: 8)
+                
                 ZStack(alignment: .topLeading) {
-
+                    // Gesture layer for events
+                    if selectedTag == "Event" {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture { print("Tap") }
+                            .gesture(
+                                LongPressGesture(minimumDuration: 0.5)
+                                    .sequenced(before: DragGesture(minimumDistance: 0))
+                                    .onChanged { value in
+                                        switch value {
+                                        case .first(true):
+                                            impactHeavy.impactOccurred()
+                                        case .second(true, let drag):
+                                            if let location = drag?.location {
+                                                if startTimelinePoint == nil {
+                                                    startTimelinePoint = findNearestTimelinePoint(to: location.y)
+                                                    previewStartTime = startTimelinePoint?.date
+                                                    isCreatingEvent = true
+                                                    lastHourFeedback = Calendar.current.component(.hour, from: previewStartTime ?? Date())
+                                                }
+                                                currentTimelinePoint = findNearestTimelinePoint(to: location.y, roundUp: true)
+                                                previewEndTime = currentTimelinePoint?.date
+                                                
+                                                if let endTime = previewEndTime,
+                                                   let lastFeedback = lastHourFeedback {
+                                                    let currentHour = Calendar.current.component(.hour, from: endTime)
+                                                    if currentHour != lastFeedback {
+                                                        impactMed.impactOccurred(intensity: 0.5)
+                                                        lastHourFeedback = currentHour
+                                                    }
+                                                }
+                                            }
+                                        default:
+                                            break
+                                        }
+                                    }
+                                    .onEnded { _ in
+                                        if let startPoint = startTimelinePoint,
+                                           let endPoint = currentTimelinePoint {
+                                            createCalendarEvent(start: startPoint.date, end: endPoint.date)
+                                        }
+                                        startTimelinePoint = nil
+                                        currentTimelinePoint = nil
+                                        isCreatingEvent = false
+                                        previewStartTime = nil
+                                        previewEndTime = nil
+                                        lastHourFeedback = nil
+                                    }
+                            )
+                            .allowsHitTesting(true)
+                    } else {
+                        // Gesture layer for tasks
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture { print("Tap") }
+                            .gesture(
+                                LongPressGesture(minimumDuration: 0.5)
+                                    .sequenced(before: DragGesture(minimumDistance: 0))
+                                    .onChanged { value in
+                                        switch value {
+                                        case .first(true):
+                                            impactHeavy.impactOccurred()
+                                        case .second(true, let drag):
+                                            if let location = drag?.location {
+                                                if startTimelinePoint == nil {
+                                                    startTimelinePoint = findNearestTimelinePoint(to: location.y)
+                                                    taskPreviewStart = startTimelinePoint?.date
+                                                    isCreatingTask = true
+                                                    lastHourFeedback = Calendar.current.component(.hour, from: taskPreviewStart ?? Date())
+                                                }
+                                                currentTimelinePoint = findNearestTimelinePoint(to: location.y, roundUp: true)
+                                                taskPreviewEnd = currentTimelinePoint?.date
+                                                
+                                                if let endTime = taskPreviewEnd,
+                                                   let lastFeedback = lastHourFeedback {
+                                                    let currentHour = Calendar.current.component(.hour, from: endTime)
+                                                    if currentHour != lastFeedback {
+                                                        impactMed.impactOccurred(intensity: 0.5)
+                                                        lastHourFeedback = currentHour
+                                                    }
+                                                }
+                                            }
+                                        default:
+                                            break
+                                        }
+                                    }
+                                    .onEnded { _ in
+                                        if let startPoint = startTimelinePoint,
+                                           let endPoint = currentTimelinePoint,
+                                           let eventId = authManager.currentUser?.events.first?.key {
+                                            
+                                            let assigneeEmail = selectedTag == "You" ?
+                                                authManager.currentUser?.email :
+                                                currentEvent?.teamMembers.first { $0.name == selectedTag }?.email
+                                            
+                                            if let email = assigneeEmail {
+                                                createTask(eventId: eventId, startTime: startPoint.date, endTime: endPoint.date, assignee: email)
+                                            }
+                                        }
+                                        startTimelinePoint = nil
+                                        currentTimelinePoint = nil
+                                        isCreatingTask = false
+                                        taskPreviewStart = nil
+                                        taskPreviewEnd = nil
+                                        lastHourFeedback = nil
+                                    }
+                            )
+                            .allowsHitTesting(true)
+                    }
+                    
                     // Timeline base layer
                     VStack(spacing: 0) {
-                        
                         ForEach(timelinePoints) { point in
                             VStack {
                                 HStack {
@@ -269,49 +382,62 @@ struct MainContentView: View {
                     }
                     .frame(minHeight: UIScreen.main.bounds.height)
                     
-                    // All views layer
-                    ForEach(tags, id: \.self) { tag in
-                        if tag == "Event" {
-                            // Events view
-                            ForEach(filteredEvents.indices, id: \.self) { index in
-                                EventView(event: filteredEvents[index], dayStartTime: startTime, events: $events, isNewEvent: filteredEvents[index].id == newEventId)
-                                    .padding(.leading, 42)
-                                    .offset(y: calculateEventOffset(for: filteredEvents[index]))
-                                    .offset(x: selectedTag == "Event" ? eventOffset : (
-                                        tags.firstIndex(of: "Event")! < tags.firstIndex(of: selectedTag)! ? 
-                                        -UIScreen.main.bounds.width : UIScreen.main.bounds.width
-                                    ))
-                                    .animation(.spring(), value: eventOffset)
-                                    .onTapGesture {
-                                        selectedEvent = filteredEvents[index]
-                                    }
-                            }
-                        } else {
-                            // Tasks view for each tag
-                            let tasks = tag == "You" ? 
-                                getFilteredTasks(forEmail: authManager.currentUser?.email) :
-                                getFilteredTasks(forEmail: currentEvent?.teamMembers.first(where: { $0.name == tag })?.email)
-                            
-                            ForEach(tasks ?? [], id: \.id) { task in
-                                TaskTimelineView(task: task, dayStartTime: startTime)
-                                    .frame(width: 362)
-                                    .padding(.leading, 42)
-                                    .padding(.trailing, 16)
-                                    .offset(y: calculateRoundedOffset(startTime: task.startTime))
-                                    .offset(x: selectedTag == tag ? taskOffset : (
-                                        tags.firstIndex(of: tag)! < tags.firstIndex(of: selectedTag)! ? 
-                                        -UIScreen.main.bounds.width : UIScreen.main.bounds.width
-                                    ))
-                                    .animation(.spring(), value: taskOffset)
+                    // Events layer (move to front)
+                    if showEvents {
+                        ForEach(tags, id: \.self) { tag in
+                            if tag == "Event" {
+                                // Events view
+                                ForEach(filteredEvents.indices, id: \.self) { index in
+                                    EventView(event: filteredEvents[index], dayStartTime: startTime, events: $events, isNewEvent: filteredEvents[index].id == newEventId)
+                                        .padding(.leading, 42)
+                                        .offset(y: calculateEventOffset(for: filteredEvents[index]))
+                                        .offset(x: selectedTag == "Event" ? eventOffset : (
+                                            tags.firstIndex(of: "Event")! < tags.firstIndex(of: selectedTag)! ? 
+                                            -UIScreen.main.bounds.width : UIScreen.main.bounds.width
+                                        ))
+                                        .animation(.spring(), value: eventOffset)
+                                        .onTapGesture {
+                                            selectedEvent = filteredEvents[index]
+                                        }
+                                        .zIndex(1)
+                                }
+                            } else {
+                                // Tasks view for each tag
+                                let tasks = tag == "You" ? 
+                                    getFilteredTasks(forEmail: authManager.currentUser?.email) :
+                                    getFilteredTasks(forEmail: currentEvent?.teamMembers.first(where: { $0.name == tag })?.email)
+                                
+                                ForEach(tasks ?? [], id: \.id) { task in
+                                    TaskTimelineView(task: task, dayStartTime: startTime)
+                                        .frame(width: 362)
+                                        .padding(.leading, 42)
+                                        .padding(.trailing, 16)
+                                        .offset(y: calculateRoundedOffset(startTime: task.startTime))
+                                        .offset(x: selectedTag == tag ? taskOffset : (
+                                            tags.firstIndex(of: tag)! < tags.firstIndex(of: selectedTag)! ? 
+                                            -UIScreen.main.bounds.width : UIScreen.main.bounds.width
+                                        ))
+                                        .animation(.spring(), value: taskOffset)
+                                        .zIndex(1)
+                                }
                             }
                         }
                     }
                     
-                    // Preview layer
+                    // Event Preview layer (keep on top)
                     if isCreatingEvent, let start = previewStartTime, let end = previewEndTime, selectedTag == "Event" {
                         EventPreviewView(startTime: start, endTime: end, dayStartTime: startTime)
                             .padding(.leading, 42)
                             .offset(y: calculateEventOffset(for: CalendarEvent(title: "", startTime: start, endTime: end, color: .clear)))
+                            .zIndex(2) // Ensure preview is above everything
+                    }
+                    
+                    // Add task preview layer
+                    if isCreatingTask, let start = taskPreviewStart, let end = taskPreviewEnd {
+                        TaskPreviewView(startTime: start, endTime: end)
+                            .padding(.leading, 42)
+                            .offset(y: calculateEventOffset(for: CalendarEvent(title: "", startTime: start, endTime: end, color: .clear)))
+                            .zIndex(2)
                     }
                 }
             }
@@ -613,6 +739,35 @@ struct MainContentView: View {
         let hoursDifference = calendar.dateComponents([.hour], from: self.startTime, to: roundedStartTime).hour ?? 0
         return CGFloat(hoursDifference) * 72.0
     }
+
+    private func createTask(eventId: String, startTime: Date, endTime: Date, assignee: String) {
+        Task {
+            do {
+                let task = try await authManager.createEventTask(
+                    eventId: eventId,
+                    title: "New Task",
+                    description: "",
+                    startTime: startTime,
+                    endTime: endTime,
+                    initialAssignee: assignee
+                )
+                
+                await MainActor.run {
+                    if var user = authManager.currentUser {
+                        if var event = user.events[eventId] {
+                            event.tasks.append(task)
+                            user.events[eventId] = event
+                            authManager.currentUser = user
+                        }
+                    }
+                    impactHeavy.impactOccurred()
+                }
+            } catch {
+                print("Failed to create task:", error)
+                notificationFeedback.notificationOccurred(.error)
+            }
+        }
+    }
 }
 
 struct TaskView: View {
@@ -826,5 +981,53 @@ struct TaskTimelineView: View {
             .padding(.vertical, 8)
             .padding(.leading, 16)
         }
+    }
+}
+
+// Add this view for task preview
+struct TaskPreviewView: View {
+    let startTime: Date
+    let endTime: Date
+    
+    var body: some View {
+        VStack(alignment: .leading) {
+            HStack {
+                Text("New Task")
+                    .font(.system(size: 18))
+                    .foregroundColor(.black)
+                Spacer()
+            }
+            Spacer()
+            HStack {
+                Text(formatEventTime(start: startTime, end: endTime))
+                    .font(.system(size: 14))
+                    .foregroundColor(.black.opacity(0.6))
+                Spacer()
+            }
+        }
+        .padding(16)
+        .frame(width: 320, height: calculateEventHeight())
+        .background(Color.white.opacity(0.5))
+        .cornerRadius(16)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.black.opacity(0.5), lineWidth: 1)
+        )
+        .padding(.vertical, 8)
+        .padding(.leading, 16)
+    }
+    
+    private func formatEventTime(start: Date, end: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return "\(formatter.string(from: start).lowercased()) - \(formatter.string(from: end).lowercased())"
+    }
+    
+    private func calculateEventHeight() -> CGFloat {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.hour, .minute], from: startTime, to: endTime)
+        let hours = CGFloat(components.hour ?? 0)
+        let minutes = CGFloat(components.minute ?? 0)
+        return (hours + minutes / 60) * 72.0 - 16
     }
 }

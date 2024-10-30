@@ -17,7 +17,7 @@ struct User: Codable {
     let name: String
     var profilePictureUrl: String?
     let token: String
-    let events: [String: Event]
+    var events: [String: Event]
     
     enum CodingKeys: String, CodingKey {
         case email
@@ -48,7 +48,7 @@ struct Event: Codable {
     let owner: String
     let calendar_events: [APICalendarEvent]
     let teamMembers: [TeamMember]
-    let tasks: [EventTask]
+    var tasks: [EventTask]
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -165,9 +165,9 @@ struct EventTask: Codable {
         case id
         case title
         case description
-        case startTime
-        case endTime
-        case assignedTo
+        case startTime = "startTime"
+        case endTime = "endTime"
+        case assignedTo = "assignedTo"
     }
     
     init(from decoder: Decoder) throws {
@@ -176,28 +176,18 @@ struct EventTask: Codable {
         id = try container.decode(String.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
         description = try container.decode(String.self, forKey: .description)
+        startTime = try container.decode(Date.self, forKey: .startTime)
+        endTime = try container.decode(Date.self, forKey: .endTime)
         
-        // Create date formatter for the specific format
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-        
-        // Decode dates using the formatter
-        let startTimeString = try container.decode(String.self, forKey: .startTime)
-        let endTimeString = try container.decode(String.self, forKey: .endTime)
-        
-        guard let parsedStartTime = dateFormatter.date(from: startTimeString),
-              let parsedEndTime = dateFormatter.date(from: endTimeString) else {
-            throw DecodingError.dataCorruptedError(
-                forKey: .startTime,
-                in: container,
-                debugDescription: "Date string does not match expected format"
-            )
+        if let singleAssignee = try? container.decode(String.self, forKey: .assignedTo) {
+            assignedTo = [AssignedUser(
+                name: "New Assignee",
+                profilePicture: nil,
+                email: singleAssignee
+            )]
+        } else {
+            assignedTo = try container.decode([AssignedUser].self, forKey: .assignedTo)
         }
-        
-        startTime = parsedStartTime
-        endTime = parsedEndTime
-        assignedTo = try container.decode([AssignedUser].self, forKey: .assignedTo)
     }
 }
 

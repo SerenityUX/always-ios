@@ -18,11 +18,40 @@ class AuthManager: ObservableObject {
     
     private func createDecoder() -> JSONDecoder {
         let decoder = JSONDecoder()
+        
         let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
-        formatter.timeZone = TimeZone(abbreviation: "UTC")
         formatter.calendar = Calendar(identifier: .iso8601)
-        decoder.dateDecodingStrategy = .formatted(formatter)
+        formatter.timeZone = TimeZone(abbreviation: "UTC")
+        
+        // Create array of date formatters to try
+        let formatters = [
+            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss"
+        ].map { format -> DateFormatter in
+            let formatter = DateFormatter()
+            formatter.dateFormat = format
+            formatter.timeZone = TimeZone(abbreviation: "UTC")
+            formatter.calendar = Calendar(identifier: .iso8601)
+            return formatter
+        }
+        
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let dateString = try container.decode(String.self)
+            
+            for formatter in formatters {
+                if let date = formatter.date(from: dateString) {
+                    return date
+                }
+            }
+            
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Cannot decode date string \(dateString)"
+            )
+        }
+        
         return decoder
     }
 
@@ -312,5 +341,79 @@ class AuthManager: ObservableObject {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.string(from: date)
+    }
+
+    func createEventTask(eventId: String, title: String, description: String, startTime: Date, endTime: Date, initialAssignee: String) async throws -> EventTask {
+        let url = URL(string: "\(baseURL)/createEventTask")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        guard let token = UserDefaults.standard.string(forKey: "authToken") else {
+            throw AuthError.invalidToken
+        }
+        
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        
+        let requestBody = [
+            "token": token,
+            "eventId": eventId,
+            "title": title,
+            "description": description,
+            "startTime": formatDate(startTime),
+            "endTime": formatDate(endTime),
+            "initialAssignee": initialAssignee
+        ]
+        
+        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AuthError.serverError
+        }
+        
+        let decoder = createDecoder()
+        return try decoder.decode(EventTask.self, from: data)
+    }
+
+    func updateEventTask(
+        taskId: String,
+        title: String? = nil,
+        description: String? = nil,
+        startTime: Date? = nil,
+        endTime: Date? = nil
+    ) async throws -> EventTask {
+        guard let token = currentUser?.token else {
+            throw AuthError.invalidToken
+        }
+        
+        var body: [String: Any] = ["token": token, "taskId": taskId]
+        
+        if let title = title { body["title"] = title }
+        if let description = description { body["description"] = description }
+        if let startTime = startTime { body["startTime"] = startTime }
+        if let endTime = endTime { body["endTime"] = endTime }
+        
+        let url = URL(string: "\(baseURL)/editEventTask")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        
+        let (data, _) = try await URLSession.shared.data(for: request)
+        
+        if let errorResponse = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
+            throw AuthError.serverError
+        }
+        
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(EventTask.self, from: data)
     }
 }
