@@ -109,12 +109,16 @@ struct MainContentView: View {
     @State private var isAnimatingTransition = false
     @State private var transitionOffset: CGFloat = 0
     
+    @State private var taskOffset: CGFloat = 0
+    
     let impactMed = UIImpactFeedbackGenerator(style: .medium)
     let impactHeavy = UIImpactFeedbackGenerator(style: .heavy)
     let notificationFeedback = UINotificationFeedbackGenerator()
     
     @EnvironmentObject var authManager: AuthManager
     @StateObject private var userState = UserState()
+    
+    @State private var proxy: ScrollViewProxy?
     
     init(initialEvents: [CalendarEvent] = []) {
         let calendar = Calendar.current
@@ -172,7 +176,7 @@ struct MainContentView: View {
             }
             .padding()
             
-            ScrollViewReader { proxy in
+            ScrollViewReader { scrollProxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
                         ForEach(tags, id: \.self) { tag in
@@ -187,39 +191,41 @@ struct MainContentView: View {
                                         .stroke(Color(red: 89/255, green: 99/255, blue: 110/255), lineWidth: selectedTag == tag ? 0 : 1)
                                 )
                                 .onTapGesture {
-                                    let userEmail: String? = {
-                                        switch tag {
-                                        case "You":
-                                            return authManager.currentUser?.email
-                                        case "Event":
-                                            return nil
-                                        default:
-                                            // Find team member's email by their name
-                                            return currentEvent?.teamMembers.first(where: { $0.name == tag })?.email
-                                        }
-                                    }()
-                                    
-                                    if let email = userEmail {
-                                        let tasks = getFilteredTasks(forEmail: email)
-                                        print("Tasks for \(tag):", tasks)
-                                    }
-                                    
-                                    if selectedTag != tag {
+                                    withAnimation {
                                         selectedTag = tag
-                                        generateHapticFeedback()
-                                        withAnimation {
-                                            proxy.scrollTo(tag, anchor: .center)
-                                        }
+                                        scrollProxy.scrollTo(tag, anchor: .center)
                                     }
+                                    generateHapticFeedback()
                                 }
                                 .id(tag)
                         }
                     }
                     .padding([.leading, .bottom, .trailing])
                 }
+                .onAppear {
+                    proxy = scrollProxy
+                }
                 .onChange(of: selectedTag) { newValue in
-                    withAnimation {
-                        proxy.scrollTo(newValue, anchor: .center)
+                    let direction = getTagDirection(from: selectedTag, to: newValue)
+                    
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        if newValue == "Event" {
+                            eventOffset = 0
+                            taskOffset = direction == .leading ? -UIScreen.main.bounds.width : UIScreen.main.bounds.width
+                        } else if selectedTag == "Event" {
+                            eventOffset = direction == .leading ? UIScreen.main.bounds.width : -UIScreen.main.bounds.width
+                            taskOffset = 0
+                        } else {
+                            // Transitioning between team members
+                            taskOffset = 0
+                            let tempOffset = direction == .leading ? UIScreen.main.bounds.width : -UIScreen.main.bounds.width
+                            withAnimation(.easeInOut(duration: 0.01)) {
+                                taskOffset = -tempOffset
+                            }
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                taskOffset = 0
+                            }
+                        }
                     }
                 }
             }
@@ -263,19 +269,42 @@ struct MainContentView: View {
                     }
                     .frame(minHeight: UIScreen.main.bounds.height)
                     
-                    // Events layer
-                    if showEvents {
-                        ForEach(filteredEvents.indices, id: \.self) { index in
-                            EventView(event: filteredEvents[index], dayStartTime: startTime, events: $events, isNewEvent: filteredEvents[index].id == newEventId)
-                                .padding(.leading, 42)
-                                .offset(y: calculateEventOffset(for: filteredEvents[index]))
-                                .offset(x: eventOffset)
-                                .animation(.spring(), value: eventOffset)
-                                .onTapGesture {
-                                    selectedEvent = filteredEvents[index]
-                                }
+                    // All views layer
+                    ForEach(tags, id: \.self) { tag in
+                        if tag == "Event" {
+                            // Events view
+                            ForEach(filteredEvents.indices, id: \.self) { index in
+                                EventView(event: filteredEvents[index], dayStartTime: startTime, events: $events, isNewEvent: filteredEvents[index].id == newEventId)
+                                    .padding(.leading, 42)
+                                    .offset(y: calculateEventOffset(for: filteredEvents[index]))
+                                    .offset(x: selectedTag == "Event" ? eventOffset : (
+                                        tags.firstIndex(of: "Event")! < tags.firstIndex(of: selectedTag)! ? 
+                                        -UIScreen.main.bounds.width : UIScreen.main.bounds.width
+                                    ))
+                                    .animation(.spring(), value: eventOffset)
+                                    .onTapGesture {
+                                        selectedEvent = filteredEvents[index]
+                                    }
+                            }
+                        } else {
+                            // Tasks view for each tag
+                            let tasks = tag == "You" ? 
+                                getFilteredTasks(forEmail: authManager.currentUser?.email) :
+                                getFilteredTasks(forEmail: currentEvent?.teamMembers.first(where: { $0.name == tag })?.email)
+                            
+                            ForEach(tasks ?? [], id: \.id) { task in
+                                TaskTimelineView(task: task, dayStartTime: startTime)
+                                    .frame(width: 362)
+                                    .padding(.leading, 42)
+                                    .padding(.trailing, 16)
+                                    .offset(y: calculateRoundedOffset(startTime: task.startTime))
+                                    .offset(x: selectedTag == tag ? taskOffset : (
+                                        tags.firstIndex(of: tag)! < tags.firstIndex(of: selectedTag)! ? 
+                                        -UIScreen.main.bounds.width : UIScreen.main.bounds.width
+                                    ))
+                                    .animation(.spring(), value: taskOffset)
+                            }
                         }
-                        .transition(.move(edge: .leading))
                     }
                     
                     // Preview layer
@@ -296,32 +325,43 @@ struct MainContentView: View {
                         let delta = value.translation.width - previous.translation.width
                         dragOffset += delta
                         
+                        // Just update the current view's offset
                         if selectedTag == "Event" {
                             eventOffset = dragOffset
+                        } else {
+                            taskOffset = dragOffset
                         }
                     }
                     previousDragValue = value
                 }
                 .onEnded { value in
                     let threshold: CGFloat = 50
-                    if dragOffset > threshold {
-                        selectPreviousTag()
-                    } else if dragOffset < -threshold {
-                        selectNextTag()
-                    } else {
-                        eventOffset = 0
+                    withAnimation(.spring()) {
+                        if dragOffset > threshold {
+                            selectPreviousTag()
+                        } else if dragOffset < -threshold {
+                            selectNextTag()
+                        } else {
+                            // Reset position
+                            if selectedTag == "Event" {
+                                eventOffset = 0
+                            } else {
+                                taskOffset = 0
+                            }
+                        }
                     }
                     dragOffset = 0
                     previousDragValue = nil
                 }
         )
         .onChange(of: selectedTag) { newValue in
-            withAnimation(.easeInOut(duration: 0.3)) {
-                showEvents = (newValue == "Event")
-                if !showEvents {
-                    eventOffset = -UIScreen.main.bounds.width
-                } else {
+            withAnimation(.spring()) {
+                if newValue == "Event" {
                     eventOffset = 0
+                    taskOffset = UIScreen.main.bounds.width
+                } else {
+                    taskOffset = 0
+                    eventOffset = -UIScreen.main.bounds.width
                 }
             }
         }
@@ -356,10 +396,23 @@ struct MainContentView: View {
     private func selectNextTag() {
         if let currentIndex = tags.firstIndex(of: selectedTag),
            currentIndex < tags.count - 1 {
-            withAnimation(.easeInOut(duration: 0.3)) {
-                selectedTag = tags[currentIndex + 1]
+            let screenWidth = UIScreen.main.bounds.width
+            let nextTag = tags[currentIndex + 1]
+            withAnimation(.spring()) {
+                selectedTag = nextTag
+                if selectedTag == "Event" {
+                    eventOffset = 0
+                    taskOffset = screenWidth
+                } else {
+                    taskOffset = 0
+                    eventOffset = -screenWidth
+                }
                 generateHapticFeedback()
-                animateEventTransition(direction: .trailing)
+                
+                // Scroll to the newly selected tag
+                withAnimation {
+                    proxy?.scrollTo(nextTag, anchor: .center)
+                }
             }
         }
     }
@@ -367,10 +420,23 @@ struct MainContentView: View {
     private func selectPreviousTag() {
         if let currentIndex = tags.firstIndex(of: selectedTag),
            currentIndex > 0 {
-            withAnimation(.easeInOut(duration: 0.3)) {
-                selectedTag = tags[currentIndex - 1]
+            let screenWidth = UIScreen.main.bounds.width
+            let previousTag = tags[currentIndex - 1]
+            withAnimation(.spring()) {
+                selectedTag = previousTag
+                if selectedTag == "Event" {
+                    eventOffset = 0
+                    taskOffset = screenWidth
+                } else {
+                    taskOffset = 0
+                    eventOffset = -screenWidth
+                }
                 generateHapticFeedback()
-                animateEventTransition(direction: .leading)
+                
+                // Scroll to the newly selected tag
+                withAnimation {
+                    proxy?.scrollTo(previousTag, anchor: .center)
+                }
             }
         }
     }
@@ -529,6 +595,24 @@ struct MainContentView: View {
     var currentEvent: Event? {
         authManager.currentUser?.events.first?.value
     }
+
+    private func getTagDirection(from oldTag: String, to newTag: String) -> Edge {
+        let tagOrder = tags // Use the existing tags array
+        if let oldIndex = tagOrder.firstIndex(of: oldTag),
+           let newIndex = tagOrder.firstIndex(of: newTag) {
+            return oldIndex < newIndex ? .trailing : .leading
+        }
+        return .trailing
+    }
+
+    private func calculateRoundedOffset(startTime: Date) -> CGFloat {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.year, .month, .day, .hour], from: startTime)
+        let roundedStartTime = calendar.date(from: components) ?? startTime
+        
+        let hoursDifference = calendar.dateComponents([.hour], from: self.startTime, to: roundedStartTime).hour ?? 0
+        return CGFloat(hoursDifference) * 72.0
+    }
 }
 
 struct TaskView: View {
@@ -556,5 +640,191 @@ struct TaskView: View {
         .background(Color.white)
         .cornerRadius(12)
         .shadow(radius: 2)
+    }
+}
+
+// Add this new component
+struct TaskAssigneeView: View {
+    let user: AssignedUser
+    let size: CGFloat = 32
+    
+    var body: some View {
+        if let profilePicture = user.profilePicture {
+            AsyncImage(url: URL(string: profilePicture)) { image in
+                image
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } placeholder: {
+                InitialsView(name: user.name, size: size)
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+        } else {
+            InitialsView(name: user.name, size: size)
+        }
+    }
+}
+
+struct InitialsView: View {
+    let name: String
+    let size: CGFloat
+    
+    private var initials: String {
+        let components = name.components(separatedBy: " ")
+        if let first = components.first?.prefix(1) {
+            return String(first).uppercased()
+        }
+        return ""
+    }
+    
+    var body: some View {
+        Circle()
+            .fill(Color(red: 89/255, green: 99/255, blue: 110/255))
+            .frame(width: size, height: size)
+            .overlay(
+                Text(initials)
+                    .font(.system(size: size * 0.4))
+                    .foregroundColor(.white)
+            )
+    }
+}
+
+// Update TaskTimelineView
+struct TaskTimelineView: View {
+    let task: EventTask
+    let dayStartTime: Date
+    
+    private var roundedStartTime: Date {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.year, .month, .day, .hour], from: task.startTime)
+        return calendar.date(from: components) ?? task.startTime
+    }
+    
+    private var roundedEndTime: Date {
+        let calendar = Calendar.current
+        var components = calendar.dateComponents([.year, .month, .day, .hour], from: task.endTime)
+        // If there are any minutes, round up to the next hour
+        if calendar.component(.minute, from: task.endTime) > 0 {
+            components.hour = (components.hour ?? 0) + 1
+        }
+        return calendar.date(from: components) ?? task.endTime
+    }
+    
+    private var duration: TimeInterval {
+        roundedEndTime.timeIntervalSince(roundedStartTime)
+    }
+    
+    private var height: CGFloat {
+        let minHeight: CGFloat = 72.0 // Minimum one hour
+        let calculatedHeight = CGFloat(duration / 3600.0) * 72.0 - 16
+        return max(minHeight - 16, calculatedHeight)
+    }
+    
+    private func formatEventTime(start: Date, end: Date) -> String {
+        let formatter = DateFormatter()
+        
+        let formatTime: (Date) -> String = { date in
+            let calendar = Calendar.current
+            let minutes = calendar.component(.minute, from: date)
+            if minutes == 0 {
+                formatter.dateFormat = "ha"  // Will show like "2pm"
+            } else {
+                formatter.dateFormat = "h:mm a"  // Will show like "2:30pm"
+            }
+            return formatter.string(from: date).lowercased()
+        }
+        
+        let startString = formatTime(start)
+        let endString = formatTime(end)
+        return "\(startString) - \(endString)"
+    }
+    
+    private var shouldShowAssignees: Bool {
+        duration > 3600 // More than 1 hour
+    }
+    
+    private var isOneHourOrLess: Bool {
+        duration <= 3600 // 1 hour or less
+    }
+    
+    var body: some View {
+        if isOneHourOrLess {
+            // One hour or less layout
+            HStack(spacing: 0) {
+                Text(task.title)
+                    .font(.system(size: 18))
+                    .foregroundColor(.black)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                
+                Spacer()
+                
+                Text(formatEventTime(start: task.startTime, end: task.endTime))
+                    .foregroundColor(.black.opacity(0.6))
+                    .font(.system(size: 14))
+                    .layoutPriority(1)
+                
+                HStack(spacing: -8) {
+                    ForEach(task.assignedTo, id: \.email) { user in
+                        TaskAssigneeView(user: user)
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.white, lineWidth: 2)
+                            )
+                    }
+                }
+                .padding(.leading, 8)
+            }
+            .padding(16)
+            .frame(height: height)
+            .background(Color.white)
+            .cornerRadius(16)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.black, lineWidth: 1)
+            )
+            .padding(.vertical, 8)
+            .padding(.leading, 16)
+        } else {
+            // Existing layout for longer events
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(task.title)
+                        .font(.system(size: 18))
+                        .foregroundColor(.black)
+                    Spacer()
+                }
+                
+                Spacer()
+                
+                HStack(alignment: .bottom) {
+
+                    Text(formatEventTime(start: task.startTime, end: task.endTime))
+                        .foregroundColor(.black.opacity(0.6))
+                        .font(.system(size: 14))
+                    
+                    Spacer()
+                    HStack(spacing: -8) {
+                        ForEach(task.assignedTo, id: \.email) { user in
+                            TaskAssigneeView(user: user)
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color.white, lineWidth: 2)
+                                )
+                        }
+                    }
+                }
+            }
+            .padding(16)
+            .frame(height: height)
+            .background(Color.white)
+            .cornerRadius(16)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.black, lineWidth: 1)
+            )
+            .padding(.vertical, 8)
+            .padding(.leading, 16)
+        }
     }
 }

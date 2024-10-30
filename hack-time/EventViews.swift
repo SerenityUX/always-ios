@@ -103,9 +103,20 @@ struct EventView: View {
     
     private func formatEventTime(start: Date, end: Date) -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "h:mm a"
-        let startString = formatter.string(from: start).lowercased()
-        let endString = formatter.string(from: end).lowercased()
+        
+        let formatTime: (Date) -> String = { date in
+            let calendar = Calendar.current
+            let minutes = calendar.component(.minute, from: date)
+            if minutes == 0 {
+                formatter.dateFormat = "ha"  // Will show like "2pm"
+            } else {
+                formatter.dateFormat = "h:mm a"  // Will show like "2:30pm"
+            }
+            return formatter.string(from: date).lowercased()
+        }
+        
+        let startString = formatTime(start)
+        let endString = formatTime(end)
         return "\(startString) - \(endString)"
     }
     
