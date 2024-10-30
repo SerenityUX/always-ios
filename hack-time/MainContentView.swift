@@ -229,7 +229,10 @@ struct MainContentView: View {
                     .foregroundColor(Color(red: 0.0, green: 0.0, blue: 0.0, opacity: 0.0))
                     .frame(height: 8)
                 ZStack(alignment: .topLeading) {
+
+                    // Timeline base layer
                     VStack(spacing: 0) {
+                        
                         ForEach(timelinePoints) { point in
                             VStack {
                                 HStack {
@@ -258,7 +261,9 @@ struct MainContentView: View {
                             .frame(height: 72.0)
                         }
                     }
+                    .frame(minHeight: UIScreen.main.bounds.height)
                     
+                    // Events layer
                     if showEvents {
                         ForEach(filteredEvents.indices, id: \.self) { index in
                             EventView(event: filteredEvents[index], dayStartTime: startTime, events: $events, isNewEvent: filteredEvents[index].id == newEventId)
@@ -273,67 +278,15 @@ struct MainContentView: View {
                         .transition(.move(edge: .leading))
                     }
                     
+                    // Preview layer
                     if isCreatingEvent, let start = previewStartTime, let end = previewEndTime, selectedTag == "Event" {
                         EventPreviewView(startTime: start, endTime: end, dayStartTime: startTime)
                             .padding(.leading, 42)
                             .offset(y: calculateEventOffset(for: CalendarEvent(title: "", startTime: start, endTime: end, color: .clear)))
                     }
                 }
-                .background(
-                    GeometryReader { geometry in
-                        Color.clear.contentShape(Rectangle())
-                            .gesture(
-                                LongPressGesture(minimumDuration: 0.5)
-                                    .sequenced(before: DragGesture(minimumDistance: 0))
-                                    .onChanged { value in
-                                        if selectedTag == "Event" {
-                                            switch value {
-                                            case .first(true):
-                                                break
-                                            case .second(true, let drag):
-                                                if let location = drag?.location {
-                                                    if self.startTimelinePoint == nil {
-                                                        self.impactHeavy.impactOccurred()
-                                                        self.startTimelinePoint = findNearestTimelinePoint(to: location.y)
-                                                        self.previewStartTime = self.startTimelinePoint?.date
-                                                        self.isCreatingEvent = true
-                                                        self.lastHourFeedback = Calendar.current.component(.hour, from: self.previewStartTime ?? Date())
-                                                    }
-                                                    self.currentTimelinePoint = findNearestTimelinePoint(to: location.y, roundUp: true)
-                                                    self.previewEndTime = self.currentTimelinePoint?.date
-                                                    
-                                                    if let endTime = self.previewEndTime,
-                                                       let lastFeedback = self.lastHourFeedback {
-                                                        let currentHour = Calendar.current.component(.hour, from: endTime)
-                                                        if currentHour != lastFeedback {
-                                                            self.impactMed.impactOccurred(intensity: 0.5)
-                                                            self.lastHourFeedback = currentHour
-                                                        }
-                                                    }
-                                                }
-                                            default:
-                                                break
-                                            }
-                                        }
-                                    }
-                                    .onEnded { value in
-                                        if selectedTag == "Event" {
-                                            if let startPoint = self.startTimelinePoint,
-                                               let endPoint = self.currentTimelinePoint {
-                                                createCalendarEvent(start: startPoint.date, end: endPoint.date)
-                                            }
-                                        }
-                                        self.startTimelinePoint = nil
-                                        self.currentTimelinePoint = nil
-                                        self.isCreatingEvent = false
-                                        self.previewStartTime = nil
-                                        self.previewEndTime = nil
-                                        self.lastHourFeedback = nil
-                                    }
-                            )
-                    }
-                )
             }
+            .frame(maxWidth: .infinity)
         }
         .ignoresSafeArea(edges: .bottom)
         .gesture(
