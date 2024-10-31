@@ -9,6 +9,10 @@ import SwiftUI
 
 struct AnnouncementModalView: View {
     @Binding var isPresented: Bool
+    @EnvironmentObject var authManager: AuthManager
+    @State private var newMessage: String = ""
+    @State private var isLoading = false
+    @FocusState private var isFocused: Bool
     
     var body: some View {
         VStack(spacing: 0) {
@@ -18,30 +22,132 @@ struct AnnouncementModalView: View {
             
             Divider()
             
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    VStack(spacing: 8) {
-                        HStack(spacing: 16){
-                            AsyncImageView(url: URL(string: "https://thispersondoesnotexist.com")!)                            
-                            Text("Alex")
-                            Text("12:23 PM")
-                                .opacity(0.5)
-                            Spacer()
-                        }
-                        Text("Hey everyone, we are pushing the dinner to 5PM because several flights have been delayed a couple of hours and transportation is taking longer than expected")
-                            .opacity(0.8)
+            if let event = authManager.selectedEvent {
+                if event.announcements.isEmpty {
+                    VStack {
+                        Spacer()
+                        Text("No announcements yet")
+                            .foregroundColor(.secondary)
+                        Spacer()
                     }
-                    .padding()
-                    Text("Announcement content goes here")
-                        .foregroundColor(Color(hue: 1.0, saturation: 0.131, brightness: 0.812, opacity: 0.0))
-                        .padding(.horizontal)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 12) {
+                            ForEach(event.announcements.sorted(by: { $0.timeSent > $1.timeSent })) { announcement in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack(spacing: 16) {
+                                        if let pictureUrl = announcement.sender.profilePicture {
+                                            AsyncImageView(url: URL(string: pictureUrl)!)
+                                        } else {
+                                            Image(systemName: "person.circle.fill")
+                                                .resizable()
+                                                .frame(width: 44, height: 44)
+                                                .foregroundColor(.gray)
+                                        }
+                                        
+                                        Text(announcement.sender.name)
+                                        
+                                        Text(formatDate(announcement.timeSent))
+                                            .foregroundColor(.secondary)
+                                        
+                                        Spacer()
+                                    }
+                                    
+                                    Text(announcement.content)
+                                        .foregroundColor(.primary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .padding(.horizontal)
+                                .padding(.vertical, 8)
+                                
+                                if announcement.id != event.announcements.sorted(by: { $0.timeSent > $1.timeSent }).last?.id {
+                                    Divider()
+                                        .padding(.horizontal)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
                 }
+            } else {
+                Text("No event selected")
+                    .foregroundColor(.secondary)
             }
             
-            Spacer()
+            Divider()
+            
+            // Message input area
+            HStack(alignment: .center, spacing: 8) {
+                TextField("Type announcement...", text: $newMessage, axis: .vertical)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .focused($isFocused)
+                    .lineLimit(1...5)
+                    .onSubmit {
+                        if !newMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            sendAnnouncement()
+                        }
+                    }
+                    .disabled(isLoading)
+                
+                Button(action: sendAnnouncement) {
+                    if isLoading {
+                        ProgressView()
+                            .frame(width: 32, height: 32)
+                    } else {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .resizable()
+                            .frame(width: 32, height: 32)
+                            .foregroundColor(.blue)
+                    }
+                }
+                .disabled(newMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isLoading)
+                .frame(height: 32)
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .background(Color(UIColor.systemBackground))
         }
+        .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 0) }
         .background(Color(UIColor.systemBackground))
-        .edgesIgnoringSafeArea(.bottom)
+    }
+    
+    private func sendAnnouncement() {
+        guard let event = authManager.selectedEvent,
+              !newMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        
+        isLoading = true
+        
+        Task {
+            do {
+                let announcement = try await authManager.createAnnouncement(
+                    content: newMessage,
+                    eventId: event.id
+                )
+                
+                await MainActor.run {
+                    // Update the UI with the new announcement
+                    authManager.addAnnouncement(announcement, to: event)
+                    
+                    // Clear the input field
+                    newMessage = ""
+                    isFocused = false
+                    isLoading = false
+                }
+            } catch {
+                print("Failed to send announcement:", error)
+                await MainActor.run {
+                    isLoading = false
+                }
+            }
+        }
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 }
 

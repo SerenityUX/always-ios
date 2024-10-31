@@ -7,6 +7,73 @@
 
 import SwiftUI
 
+struct NoEventsView: View {
+    @EnvironmentObject var authManager: AuthManager
+    @State private var showCreateEventModal = false
+    
+    var body: some View {
+        VStack {
+            Spacer()
+            
+            VStack(spacing: 12) {
+                Spacer()
+                Text("You are not a part of any events yet...")
+                    .font(.body)
+                    .multilineTextAlignment(.center)
+
+                
+                Text("Create an event or ask an organizer to add you to their event")
+                    .font(.body)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+                
+                Spacer()
+
+                HStack(spacing: 16) {
+                    Button(action: {
+                        if let email = authManager.currentUser?.email {
+                            let message = "Hey! I joined HackTime but I have not been added to the event yet. Please invite me with my email \(email) to the event."
+                            let urlString = "sms:&body=\(message)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+                            if let url = URL(string: urlString) {
+                                UIApplication.shared.open(url)
+                            }
+                        }
+                    }) {
+                        Text("Ask for Invite")
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .foregroundColor(.blue)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Color.blue, lineWidth: 1)
+                            )
+                    }
+                    
+                    Button(action: {
+                        showCreateEventModal = true
+                    }) {
+                        Text("Create Event")
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .foregroundColor(.white)
+                            .background(Color.blue)
+                            .cornerRadius(10)
+                    }
+                }
+                .padding(.bottom, 16)
+                .padding()
+            }
+            
+            Spacer()
+        }
+        .sheet(isPresented: $showCreateEventModal) {
+            CreateEventView(isPresented: $showCreateEventModal)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+    }
+}
+
 struct MainContentView: View {
     @State var startTime: Date
     @State var endTime: Date
@@ -20,6 +87,8 @@ struct MainContentView: View {
             let teamMemberNames = event.teamMembers.map { $0.name }
             dynamicTags.append(contentsOf: teamMemberNames)
         }
+        
+        dynamicTags.append("invite")
         
         return dynamicTags
     }
@@ -61,18 +130,21 @@ struct MainContentView: View {
     var filteredTasks: [EventTask] {
         guard let event = authManager.selectedEvent else { return [] }
 
+        // Filter tasks for the current event first
+        let eventTasks = event.tasks
+
         switch selectedTag {
         case "Event":
-            return event.tasks
+            return eventTasks
         case "You":
-            return event.tasks.filter { task in
+            return eventTasks.filter { task in
                 task.assignedTo.contains { user in
                     user.email == authManager.currentUser?.email
                 }
             }
         default:
             // Filter by selected team member name
-            return event.tasks.filter { task in
+            return eventTasks.filter { task in
                 task.assignedTo.contains { user in
                     user.name == selectedTag
                 }
@@ -81,10 +153,10 @@ struct MainContentView: View {
     }
     
     func getFilteredTasks(forEmail email: String?) -> [EventTask] {
-    guard let email = email,
-          let event = authManager.selectedEvent else { return [] }
-    
-    return event.tasksForUser(email: email)
+        guard let email = email,
+              let event = authManager.selectedEvent else { return [] }
+        
+        return event.tasksForUser(email: email)
     }
     
     @State private var dragOffset: CGFloat = 0
@@ -129,6 +201,8 @@ struct MainContentView: View {
     @State private var editingTaskTitle: String = ""
     @FocusState private var isTaskTitleFocused: Bool
     
+    @State private var showInviteModal = false
+    
     init(initialEvents: [CalendarEvent] = []) {
         var calendar = Calendar.current
         calendar.timeZone = TimeZone(abbreviation: "UTC")!
@@ -169,16 +243,19 @@ struct MainContentView: View {
 
                 Spacer()
 
-                Button(action: {
-                    isAnnouncementModalPresented = true
-                }) {
-                    Image(systemName: "message.fill")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 32, height: 32)
-                        .foregroundColor(Color(red: 89/255, green: 99/255, blue: 110/255))
+                // Only show announcements button if user has events
+                if !(authManager.currentUser?.events.isEmpty ?? true) {
+                    Button(action: {
+                        isAnnouncementModalPresented = true
+                    }) {
+                        Image(systemName: "message.fill")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 32, height: 32)
+                            .foregroundColor(Color(red: 89/255, green: 99/255, blue: 110/255))
+                    }
+                    .padding(.trailing, 8)
                 }
-                .padding(.trailing, 8)
 
                 if let user = userState.user {
                     ProfileImageView(user: user)
@@ -191,258 +268,287 @@ struct MainContentView: View {
             }
             .padding()
             
-            ScrollViewReader { scrollProxy in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(tags, id: \.self) { tag in
-                            Text(tag)
-                                .foregroundColor(selectedTag == tag ? .white : Color(red: 89/255, green: 99/255, blue: 110/255))
-                                .padding(.horizontal, 12.0)
-                                .padding(.vertical, 8.0)
-                                .background(selectedTag == tag ? Color.black : Color.white)
-                                .cornerRadius(12)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color(red: 89/255, green: 99/255, blue: 110/255), lineWidth: selectedTag == tag ? 0 : 1)
-                                )
-                                .onTapGesture {
-                                    withAnimation {
-                                        selectedTag = tag
-                                        scrollProxy.scrollTo(tag, anchor: .center)
+            // Check if user has any events
+            if authManager.currentUser?.events.isEmpty ?? true {
+                NoEventsView()
+                    .padding(.top, 40)
+            } else {
+                ScrollViewReader { scrollProxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(tags, id: \.self) { tag in
+                                if tag == "invite" {
+                                    // Special invite button
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "plus")
+                                        Text("Add")
                                     }
-                                    generateHapticFeedback()
+                                    .foregroundColor(Color(red: 89/255, green: 99/255, blue: 110/255))
+                                    .padding(.horizontal, 12.0)
+                                    .padding(.vertical, 8.0)
+                                    .background(Color.white)
+                                    .cornerRadius(12)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(Color(red: 89/255, green: 99/255, blue: 110/255), lineWidth: 1)
+                                    )
+                                    .onTapGesture {
+                                        showInviteModal = true
+                                        generateHapticFeedback()
+                                    }
+                                    .id(tag)
+                                } else {
+                                    // Regular tag button (unchanged)
+                                    Text(tag)
+                                        .foregroundColor(selectedTag == tag ? .white : Color(red: 89/255, green: 99/255, blue: 110/255))
+                                        .padding(.horizontal, 12.0)
+                                        .padding(.vertical, 8.0)
+                                        .background(selectedTag == tag ? Color.black : Color.white)
+                                        .cornerRadius(12)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(Color(red: 89/255, green: 99/255, blue: 110/255), lineWidth: selectedTag == tag ? 0 : 1)
+                                        )
+                                        .onTapGesture {
+                                            withAnimation {
+                                                selectedTag = tag
+                                                scrollProxy.scrollTo(tag, anchor: .center)
+                                            }
+                                            generateHapticFeedback()
+                                        }
+                                        .id(tag)
                                 }
-                                .id(tag)
-                        }
-                    }
-                    .padding([.leading, .bottom, .trailing])
-                }
-                .onAppear {
-                    proxy = scrollProxy
-                }
-                .onChange(of: selectedTag) { newValue in
-                    let direction = getTagDirection(from: selectedTag, to: newValue)
-                    
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        if newValue == "Event" {
-                            eventOffset = 0
-                            taskOffset = direction == .leading ? -UIScreen.main.bounds.width : UIScreen.main.bounds.width
-                        } else if selectedTag == "Event" {
-                            eventOffset = direction == .leading ? UIScreen.main.bounds.width : -UIScreen.main.bounds.width
-                            taskOffset = 0
-                        } else {
-                            // Transitioning between team members
-                            taskOffset = 0
-                            let tempOffset = direction == .leading ? UIScreen.main.bounds.width : -UIScreen.main.bounds.width
-                            withAnimation(.easeInOut(duration: 0.01)) {
-                                taskOffset = -tempOffset
                             }
-                            withAnimation(.easeInOut(duration: 0.3)) {
+                        }
+                        .padding([.leading, .bottom, .trailing])
+                    }
+                    .onAppear {
+                        proxy = scrollProxy
+                    }
+                    .onChange(of: selectedTag) { newValue in
+                        let direction = getTagDirection(from: selectedTag, to: newValue)
+                        
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            if newValue == "Event" {
+                                eventOffset = 0
+                                taskOffset = direction == .leading ? -UIScreen.main.bounds.width : UIScreen.main.bounds.width
+                            } else if selectedTag == "Event" {
+                                eventOffset = direction == .leading ? UIScreen.main.bounds.width : -UIScreen.main.bounds.width
                                 taskOffset = 0
+                            } else {
+                                // Transitioning between team members
+                                taskOffset = 0
+                                let tempOffset = direction == .leading ? UIScreen.main.bounds.width : -UIScreen.main.bounds.width
+                                withAnimation(.easeInOut(duration: 0.01)) {
+                                    taskOffset = -tempOffset
+                                }
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    taskOffset = 0
+                                }
                             }
                         }
                     }
                 }
-            }
-            
-            ScrollView {
-                Text("it's hack time you hacker...")
-                    .foregroundColor(Color(red: 0.0, green: 0.0, blue: 0.0, opacity: 0.0))
-                    .frame(height: 8)
                 
-                ZStack(alignment: .topLeading) {
-                    // Gesture layer for events
-                    if selectedTag == "Event" {
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .onTapGesture { print("Tap") }
-                            .gesture(
-                                LongPressGesture(minimumDuration: 0.5)
-                                    .sequenced(before: DragGesture(minimumDistance: 0))
-                                    .onChanged { value in
-                                        switch value {
-                                        case .first(true):
-                                            impactHeavy.impactOccurred()
-                                        case .second(true, let drag):
-                                            if let location = drag?.location {
-                                                if startTimelinePoint == nil {
-                                                    startTimelinePoint = findNearestTimelinePoint(to: location.y)
-                                                    previewStartTime = startTimelinePoint?.date
-                                                    isCreatingEvent = true
-                                                    lastHourFeedback = Calendar.current.component(.hour, from: previewStartTime ?? Date())
-                                                }
-                                                currentTimelinePoint = findNearestTimelinePoint(to: location.y, roundUp: true)
-                                                previewEndTime = currentTimelinePoint?.date
-                                                
-                                                if let endTime = previewEndTime,
-                                                   let lastFeedback = lastHourFeedback {
-                                                    let currentHour = Calendar.current.component(.hour, from: endTime)
-                                                    if currentHour != lastFeedback {
-                                                        impactMed.impactOccurred(intensity: 0.5)
-                                                        lastHourFeedback = currentHour
-                                                    }
-                                                }
-                                            }
-                                        default:
-                                            break
-                                        }
-                                    }
-                                    .onEnded { _ in
-                                        if let startPoint = startTimelinePoint,
-                                           let endPoint = currentTimelinePoint {
-                                            createCalendarEvent(start: startPoint.date, end: endPoint.date)
-                                        }
-                                        startTimelinePoint = nil
-                                        currentTimelinePoint = nil
-                                        isCreatingEvent = false
-                                        previewStartTime = nil
-                                        previewEndTime = nil
-                                        lastHourFeedback = nil
-                                    }
-                            )
-                            .allowsHitTesting(true)
-                    } else {
-                        // Gesture layer for tasks
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .onTapGesture { print("Tap") }
-                            .gesture(
-                                LongPressGesture(minimumDuration: 0.5)
-                                    .sequenced(before: DragGesture(minimumDistance: 0))
-                                    .onChanged { value in
-                                        switch value {
-                                        case .first(true):
-                                            impactHeavy.impactOccurred()
-                                        case .second(true, let drag):
-                                            if let location = drag?.location {
-                                                if startTimelinePoint == nil {
-                                                    startTimelinePoint = findNearestTimelinePoint(to: location.y)
-                                                    taskPreviewStart = startTimelinePoint?.date
-                                                    isCreatingTask = true
-                                                    lastHourFeedback = Calendar.current.component(.hour, from: taskPreviewStart ?? Date())
-                                                }
-                                                currentTimelinePoint = findNearestTimelinePoint(to: location.y, roundUp: true)
-                                                taskPreviewEnd = currentTimelinePoint?.date
-                                                
-                                                if let endTime = taskPreviewEnd,
-                                                   let lastFeedback = lastHourFeedback {
-                                                    let currentHour = Calendar.current.component(.hour, from: endTime)
-                                                    if currentHour != lastFeedback {
-                                                        impactMed.impactOccurred(intensity: 0.5)
-                                                        lastHourFeedback = currentHour
-                                                    }
-                                                }
-                                            }
-                                        default:
-                                            break
-                                        }
-                                    }
-                                    .onEnded { _ in
-                                        if let startPoint = startTimelinePoint,
-                                           let endPoint = currentTimelinePoint,
-                                           let eventId = authManager.currentUser?.events.first?.key {
-                                            
-                                            let assigneeEmail = selectedTag == "You" ?
-                                                authManager.currentUser?.email :
-                                                currentEvent?.teamMembers.first { $0.name == selectedTag }?.email
-                                            
-                                            if let email = assigneeEmail {
-                                                createTask(eventId: eventId, startTime: startPoint.date, endTime: endPoint.date, assignee: email)
-                                            }
-                                        }
-                                        startTimelinePoint = nil
-                                        currentTimelinePoint = nil
-                                        isCreatingTask = false
-                                        taskPreviewStart = nil
-                                        taskPreviewEnd = nil
-                                        lastHourFeedback = nil
-                                    }
-                            )
-                            .allowsHitTesting(true)
-                    }
+                ScrollView {
+                    Text("it's hack time you hacker...")
+                        .foregroundColor(Color(red: 0.0, green: 0.0, blue: 0.0, opacity: 0.0))
+                        .frame(height: 8)
                     
-                    // Timeline base layer
-                    VStack(spacing: 0) {
-                        ForEach(timelinePoints) { point in
-                            VStack {
-                                HStack {
-                                    VStack(alignment: .leading) {
-                                        if shouldShowWeekday(for: point.date) {
-                                            Text(formatWeekday(date: point.date))
+                    ZStack(alignment: .topLeading) {
+                        // Gesture layer for events
+                        if selectedTag == "Event" {
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onTapGesture { print("Tap") }
+                                .gesture(
+                                    LongPressGesture(minimumDuration: 0.5)
+                                        .sequenced(before: DragGesture(minimumDistance: 0))
+                                        .onChanged { value in
+                                            switch value {
+                                            case .first(true):
+                                                impactHeavy.impactOccurred()
+                                            case .second(true, let drag):
+                                                if let location = drag?.location {
+                                                    if startTimelinePoint == nil {
+                                                        startTimelinePoint = findNearestTimelinePoint(to: location.y)
+                                                        previewStartTime = startTimelinePoint?.date
+                                                        isCreatingEvent = true
+                                                        lastHourFeedback = Calendar.current.component(.hour, from: previewStartTime ?? Date())
+                                                    }
+                                                    currentTimelinePoint = findNearestTimelinePoint(to: location.y, roundUp: true)
+                                                    previewEndTime = currentTimelinePoint?.date
+                                                    
+                                                    if let endTime = previewEndTime,
+                                                       let lastFeedback = lastHourFeedback {
+                                                        let currentHour = Calendar.current.component(.hour, from: endTime)
+                                                        if currentHour != lastFeedback {
+                                                            impactMed.impactOccurred(intensity: 0.5)
+                                                            lastHourFeedback = currentHour
+                                                        }
+                                                    }
+                                                }
+                                            default:
+                                                break
+                                            }
+                                        }
+                                        .onEnded { _ in
+                                            if let startPoint = startTimelinePoint,
+                                               let endPoint = currentTimelinePoint {
+                                                createCalendarEvent(start: startPoint.date, end: endPoint.date)
+                                            }
+                                            startTimelinePoint = nil
+                                            currentTimelinePoint = nil
+                                            isCreatingEvent = false
+                                            previewStartTime = nil
+                                            previewEndTime = nil
+                                            lastHourFeedback = nil
+                                        }
+                                )
+                                .allowsHitTesting(true)
+                        } else {
+                            // Gesture layer for tasks
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onTapGesture { print("Tap") }
+                                .gesture(
+                                    LongPressGesture(minimumDuration: 0.5)
+                                        .sequenced(before: DragGesture(minimumDistance: 0))
+                                        .onChanged { value in
+                                            switch value {
+                                            case .first(true):
+                                                impactHeavy.impactOccurred()
+                                            case .second(true, let drag):
+                                                if let location = drag?.location {
+                                                    if startTimelinePoint == nil {
+                                                        startTimelinePoint = findNearestTimelinePoint(to: location.y)
+                                                        taskPreviewStart = startTimelinePoint?.date
+                                                        isCreatingTask = true
+                                                        lastHourFeedback = Calendar.current.component(.hour, from: taskPreviewStart ?? Date())
+                                                    }
+                                                    currentTimelinePoint = findNearestTimelinePoint(to: location.y, roundUp: true)
+                                                    taskPreviewEnd = currentTimelinePoint?.date
+                                                    
+                                                    if let endTime = taskPreviewEnd,
+                                                       let lastFeedback = lastHourFeedback {
+                                                        let currentHour = Calendar.current.component(.hour, from: endTime)
+                                                        if currentHour != lastFeedback {
+                                                            impactMed.impactOccurred(intensity: 0.5)
+                                                            lastHourFeedback = currentHour
+                                                        }
+                                                    }
+                                                }
+                                            default:
+                                                break
+                                            }
+                                        }
+                                        .onEnded { _ in
+                                            if let startPoint = startTimelinePoint,
+                                               let endPoint = currentTimelinePoint,
+                                               let eventId = authManager.selectedEventId {
+                                                
+                                                let assigneeEmail = selectedTag == "You" ?
+                                                    authManager.currentUser?.email :
+                                                    authManager.selectedEvent?.teamMembers.first { $0.name == selectedTag }?.email
+                                                
+                                                if let email = assigneeEmail {
+                                                    createTask(eventId: eventId, startTime: startPoint.date, endTime: endPoint.date, assignee: email)
+                                                }
+                                            }
+                                            startTimelinePoint = nil
+                                            currentTimelinePoint = nil
+                                            isCreatingTask = false
+                                            taskPreviewStart = nil
+                                            taskPreviewEnd = nil
+                                            lastHourFeedback = nil
+                                        }
+                                )
+                                .allowsHitTesting(true)
+                        }
+                        
+                        // Timeline base layer
+                        VStack(spacing: 0) {
+                            ForEach(timelinePoints) { point in
+                                VStack {
+                                    HStack {
+                                        VStack(alignment: .leading) {
+                                            if shouldShowWeekday(for: point.date) {
+                                                Text(formatWeekday(date: point.date))
+                                                    .font(.system(size: 14))
+                                                    .foregroundColor(Color(hue: 1.0, saturation: 0.0, brightness: 0.459))
+                                                    .frame(width: 32, alignment: .leading)
+                                            }
+                                            
+                                            Text(formatTime(date: point.date))
                                                 .font(.system(size: 14))
                                                 .foregroundColor(Color(hue: 1.0, saturation: 0.0, brightness: 0.459))
-                                                .frame(width: 32, alignment: .leading)
+                                                .frame(width: 42, alignment: .leading)
                                         }
+                                        .padding(.leading, 12)
+                                        .frame(height: 0, alignment: .leading)
                                         
-                                        Text(formatTime(date: point.date))
-                                            .font(.system(size: 14))
-                                            .foregroundColor(Color(hue: 1.0, saturation: 0.0, brightness: 0.459))
-                                            .frame(width: 42, alignment: .leading)
+                                        VStack {
+                                            Divider()
+                                        }
                                     }
-                                    .padding(.leading, 12)
-                                    .frame(height: 0, alignment: .leading)
-                                    
-                                    VStack {
-                                        Divider()
-                                    }
+                                    Spacer()
                                 }
-                                Spacer()
+                                .frame(height: 72.0)
                             }
-                            .frame(height: 72.0)
                         }
-                    }
-                    .frame(minHeight: UIScreen.main.bounds.height)
-                    
-                    // Events layer (move to front)
-                    if showEvents {
-                        ForEach(tags, id: \.self) { tag in
-                            Group {
-                                if tag == "Event" {
-                                    // Events view
-                                    ForEach(filteredEvents.indices, id: \.self) { index in
-                                        EventView(event: filteredEvents[index], dayStartTime: startTime, events: $events, isNewEvent: filteredEvents[index].id == newEventId)
-                                            .padding(.leading, 42)
-                                            .offset(y: calculateEventOffset(for: filteredEvents[index]))
-                                            .offset(x: selectedTag == "Event" ? eventOffset : (
-                                                tags.firstIndex(of: "Event")! < tags.firstIndex(of: selectedTag)! ? 
-                                                -UIScreen.main.bounds.width : UIScreen.main.bounds.width
-                                            ))
-                                            .animation(.spring(), value: eventOffset)
-                                            .onTapGesture {
-                                                selectedEvent = filteredEvents[index]
-                                            }
-                                            .zIndex(1)
-                                    }
-                                } else {
-                                    // Tasks view for each tag
-                                    let tasks = getTasksForTag(tag: tag)
-                                    
-                                    ForEach(tasks ?? [], id: \.id) { task in
-                                        createTaskView(task: task, tag: tag)
+                        .frame(minHeight: UIScreen.main.bounds.height)
+                        
+                        // Events layer (move to front)
+                        if showEvents {
+                            ForEach(tags, id: \.self) { tag in
+                                Group {
+                                    if tag == "Event" {
+                                        // Events view
+                                        ForEach(filteredEvents.indices, id: \.self) { index in
+                                            EventView(event: filteredEvents[index], dayStartTime: startTime, events: $events, isNewEvent: filteredEvents[index].id == newEventId)
+                                                .padding(.leading, 42)
+                                                .offset(y: calculateEventOffset(for: filteredEvents[index]))
+                                                .offset(x: selectedTag == "Event" ? eventOffset : (
+                                                    tags.firstIndex(of: "Event")! < tags.firstIndex(of: selectedTag)! ? 
+                                                    -UIScreen.main.bounds.width : UIScreen.main.bounds.width
+                                                ))
+                                                .animation(.spring(), value: eventOffset)
+                                                .onTapGesture {
+                                                    selectedEvent = filteredEvents[index]
+                                                }
+                                                .zIndex(1)
+                                        }
+                                    } else {
+                                        // Tasks view for each tag
+                                        let tasks = getTasksForTag(tag: tag)
+                                        
+                                        ForEach(tasks ?? [], id: \.id) { task in
+                                            createTaskView(task: task, tag: tag)
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                    
-                    // Event Preview layer (keep on top)
-                    if isCreatingEvent, let start = previewStartTime, let end = previewEndTime, selectedTag == "Event" {
-                        EventPreviewView(startTime: start, endTime: end, dayStartTime: startTime)
-                            .padding(.leading, 42)
-                            .offset(y: calculateEventOffset(for: CalendarEvent(title: "", startTime: start, endTime: end, color: .clear)))
-                            .zIndex(2) // Ensure preview is above everything
-                    }
-                    
-                    // Add task preview layer
-                    if isCreatingTask, let start = taskPreviewStart, let end = taskPreviewEnd {
-                        TaskPreviewView(startTime: start, endTime: end)
-                            .padding(.leading, 42)
-                            .offset(y: calculateEventOffset(for: CalendarEvent(title: "", startTime: start, endTime: end, color: .clear)))
-                            .zIndex(2)
+                        
+                        // Event Preview layer (keep on top)
+                        if isCreatingEvent, let start = previewStartTime, let end = previewEndTime, selectedTag == "Event" {
+                            EventPreviewView(startTime: start, endTime: end, dayStartTime: startTime)
+                                .padding(.leading, 42)
+                                .offset(y: calculateEventOffset(for: CalendarEvent(title: "", startTime: start, endTime: end, color: .clear)))
+                                .zIndex(2) // Ensure preview is above everything
+                        }
+                        
+                        // Add task preview layer
+                        if isCreatingTask, let start = taskPreviewStart, let end = taskPreviewEnd {
+                            TaskPreviewView(startTime: start, endTime: end)
+                                .padding(.leading, 42)
+                                .offset(y: calculateEventOffset(for: CalendarEvent(title: "", startTime: start, endTime: end, color: .clear)))
+                                .zIndex(2)
+                        }
                     }
                 }
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity)
         }
         .ignoresSafeArea(edges: .bottom)
         .gesture(
@@ -525,6 +631,23 @@ struct MainContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RefreshCalendarEvents"))) { _ in
             // Toggle forceUpdate to trigger a recalculation of filteredEvents
             forceUpdate.toggle()
+        }
+        .onChange(of: authManager.selectedEventId) { _ in
+            if let event = authManager.selectedEvent {
+                startTime = event.startTime
+                endTime = event.endTime
+                timelinePoints = hoursBetween(start: event.startTime, end: event.endTime)
+            
+            }
+        }
+        .sheet(isPresented: $showInviteModal) {
+            InviteModalView(
+                isPresented: $showInviteModal,
+                selectedTag: $selectedTag,
+                scrollProxy: proxy
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
     }
 
@@ -802,21 +925,22 @@ struct MainContentView: View {
     }
 
     private func updateTaskTitle(task: EventTask) {
-        let newTitle = editingTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        
         Task {
             do {
                 let updatedTask = try await authManager.updateEventTask(
                     taskId: task.id,
-                    title: newTitle
+                    title: editingTaskTitle,
+                    description: nil,
+                    startTime: nil,
+                    endTime: nil
                 )
                 
                 await MainActor.run {
                     if var user = authManager.currentUser,
-                       let eventId = user.events.first?.key,
+                       let eventId = authManager.selectedEventId,
                        var event = user.events[eventId],
                        let taskIndex = event.tasks.firstIndex(where: { $0.id == task.id }) {
-                        event.tasks[taskIndex].title = newTitle
+                        event.tasks[taskIndex] = updatedTask
                         user.events[eventId] = event
                         authManager.currentUser = user
                     }
@@ -1498,8 +1622,16 @@ struct TaskDetailModalView: View {
                 )
                 
                 await MainActor.run {
-                    updateLocalTask(updatedTask)
-                    impactMed.impactOccurred(intensity: 0.5)
+                    if var user = authManager.currentUser,
+                       let eventId = authManager.selectedEventId,
+                       var event = user.events[eventId],
+                       let taskIndex = event.tasks.firstIndex(where: { $0.id == task.id }) {
+                        event.tasks[taskIndex] = updatedTask
+                        user.events[eventId] = event
+                        authManager.currentUser = user
+                    }
+                    let impact = UIImpactFeedbackGenerator(style: .medium)
+                    impact.impactOccurred(intensity: 0.5)
                 }
             } catch {
                 print("Failed to update task title:", error)
@@ -1522,7 +1654,14 @@ struct TaskDetailModalView: View {
                 )
                 
                 await MainActor.run {
-                    updateLocalTask(updatedTask)
+                    if var user = authManager.currentUser,
+                       let eventId = authManager.selectedEventId,
+                       var event = user.events[eventId],
+                       let taskIndex = event.tasks.firstIndex(where: { $0.id == task.id }) {
+                        event.tasks[taskIndex] = updatedTask
+                        user.events[eventId] = event
+                        authManager.currentUser = user
+                    }
                     impactMed.impactOccurred(intensity: 0.5)
                 }
             } catch {
@@ -1752,6 +1891,185 @@ struct TimePickerView: View {
                 }
             )
             .padding()
+        }
+    }
+}
+
+struct InviteModalView: View {
+    @Binding var isPresented: Bool
+    @Binding var selectedTag: String
+    let scrollProxy: ScrollViewProxy?
+    
+    @State private var email: String = ""
+    @State private var name: String = ""
+    @State private var role: String = ""
+    @State private var isLoading = false
+    @State private var error: String?
+    @EnvironmentObject var authManager: AuthManager
+    
+    @State private var isCheckingEmail = false
+    @State private var emailCheckTimer: Timer?
+    @State private var isExistingUser = false
+    
+    let impactMed = UIImpactFeedbackGenerator(style: .medium)
+    let notificationFeedback = UINotificationFeedbackGenerator()
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("Team Member Details")) {
+                    TextField("Email", text: $email)
+                        .textContentType(.emailAddress)
+                        .keyboardType(.emailAddress)
+                        .autocapitalization(.none)
+                        .onChange(of: email) { newValue in
+                            emailCheckTimer?.invalidate()
+                            if newValue.contains("@") && newValue.contains(".") {
+                                emailCheckTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
+                                    checkEmail()
+                                }
+                            }
+                        }
+                    
+                    TextField("Name", text: $name)
+                        .textContentType(.name)
+                        .disabled(isCheckingEmail)
+                        .overlay(
+                            Group {
+                                if isCheckingEmail {
+                                    HStack {
+                                        Spacer()
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle())
+                                    }
+                                }
+                            }
+                        )
+                }
+                
+                Section(header: Text("Role Description (Optional)")) {
+                    TextEditor(text: $role)
+                        .frame(height: 100)
+                }
+                
+                if let error = error {
+                    Section {
+                        Text(error)
+                            .foregroundColor(.red)
+                    }
+                }
+            }
+            .navigationTitle("Invite Team Member")
+            .navigationBarItems(
+                trailing: Button("Cancel") {
+                    isPresented = false
+                }
+            )
+            .safeAreaInset(edge: .bottom) {
+                VStack {
+                    Button(action: inviteUser) {
+                        if isLoading {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle())
+                                .tint(.white)
+                        } else {
+                            Text("Send Invite")
+                                .font(.headline)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(
+                        email.isEmpty || name.isEmpty || isLoading || isCheckingEmail ?
+                            Color.blue.opacity(0.5) :
+                            Color.blue
+                    )
+                    .foregroundColor(.white)
+                    .cornerRadius(16)
+                    .padding(.horizontal)
+                    .disabled(email.isEmpty || name.isEmpty || isLoading || isCheckingEmail)
+                }
+                .padding(.bottom)
+                .background(Color(UIColor.systemGroupedBackground))
+            }
+        }
+        .onDisappear {
+            emailCheckTimer?.invalidate()
+        }
+    }
+    
+    private func checkEmail() {
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedEmail.isEmpty else { return }
+        
+        isCheckingEmail = true
+        
+        Task {
+            do {
+                let result = try await authManager.checkUserExists(email: trimmedEmail)
+                await MainActor.run {
+                    isExistingUser = result.exists
+                    if let existingName = result.name {
+                        name = existingName
+                        impactMed.impactOccurred(intensity: 0.5)
+                    }
+                    isCheckingEmail = false
+                }
+            } catch {
+                await MainActor.run {
+                    isCheckingEmail = false
+                }
+            }
+        }
+    }
+    
+    private func inviteUser() {
+        guard let eventId = authManager.selectedEventId else {
+            error = "No event selected"
+            return
+        }
+        
+        isLoading = true
+        error = nil
+        
+        Task {
+            do {
+                print("\n=== Sending Invite ===")
+                let newTeamMember = try await authManager.inviteUserToEvent(
+                    email: email.trimmingCharacters(in: .whitespacesAndNewlines),
+                    name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                    roleDescription: role.isEmpty ? nil : role.trimmingCharacters(in: .whitespacesAndNewlines),
+                    eventId: eventId
+                )
+                
+                await MainActor.run {
+                    print("\nInvite successful:")
+                    print("New team member:", newTeamMember.name)
+                    
+                    // Switch to the new team member's tab
+                    withAnimation {
+                        selectedTag = newTeamMember.name
+                        if let proxy = scrollProxy {
+                            proxy.scrollTo(newTeamMember.name, anchor: .center)
+                        }
+                    }
+                    
+                    impactMed.impactOccurred()
+                    isPresented = false
+                }
+            } catch AuthError.notAuthorized {
+                error = "You don't have permission to invite users to this event"
+                notificationFeedback.notificationOccurred(.error)
+            } catch AuthError.userAlreadyInvited(let message) {
+                error = message
+                notificationFeedback.notificationOccurred(.error)
+            } catch {
+                print("\nInvite error:", error)
+                self.error = "Failed to send invite. Please try again."
+                notificationFeedback.notificationOccurred(.error)
+            }
+            
+            isLoading = false
         }
     }
 }

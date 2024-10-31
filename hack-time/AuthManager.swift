@@ -7,6 +7,39 @@
 
 import SwiftUI
 import Foundation
+import OneSignalFramework
+
+enum AuthError: Error {
+    case invalidCredentials
+    case invalidToken
+    case invalidResponse
+    case serverError
+    case emailInUse
+    case invalidCode
+    case notAuthorized
+    case userAlreadyInvited(String)
+    
+    var localizedDescription: String {
+        switch self {
+        case .invalidCredentials:
+            return "Invalid email or password"
+        case .invalidToken:
+            return "Invalid or expired token"
+        case .invalidResponse:
+            return "Invalid response from server"
+        case .serverError:
+            return "Server error occurred"
+        case .emailInUse:
+            return "Email is already in use"
+        case .invalidCode:
+            return "Invalid verification code"
+        case .notAuthorized:
+            return "You are not authorized to perform this action"
+        case .userAlreadyInvited(let message):
+            return message
+        }
+    }
+}
 
 class AuthManager: ObservableObject {
     @Published var isAuthenticated = false
@@ -133,6 +166,16 @@ class AuthManager: ObservableObject {
         return result.profilePictureUrl
     }
 
+    private func setOneSignalExternalId(_ email: String) {
+        // First remove any existing external user ID
+        OneSignal.logout()
+        
+        // Then set the new external user ID using login
+        OneSignal.login(email)
+        
+        print("Set OneSignal external user ID to:", email)
+    }
+
     func login(email: String, password: String) async throws -> String {
         let url = URL(string: "\(baseURL)/login")!
         var request = URLRequest(url: url)
@@ -157,6 +200,10 @@ class AuthManager: ObservableObject {
         }
         
         let result = try JSONDecoder().decode(TokenResponse.self, from: data)
+        
+        // Set OneSignal external user ID after successful login
+        setOneSignalExternalId(email)
+        
         return result.token
     }
     
@@ -219,6 +266,10 @@ class AuthManager: ObservableObject {
         await MainActor.run {
             self.currentUser = user
         }
+        
+        // Set OneSignal external user ID after successful token validation
+        setOneSignalExternalId(user.email)
+        
         return user
     }
     
@@ -626,5 +677,285 @@ class AuthManager: ObservableObject {
             print("Event ID exists:", eventId)
         }
         print("------------------------")
+    }
+
+    func logout() {
+        // Clear OneSignal external user ID
+        OneSignal.logout()
+        
+        // Clear other auth data
+        UserDefaults.standard.removeObject(forKey: "authToken")
+        UserDefaults.standard.removeObject(forKey: "selectedEventId")
+        
+        // Reset state
+        currentUser = nil
+        selectedEventId = nil
+        isAuthenticated = false
+    }
+
+    func createAnnouncement(content: String, eventId: String) async throws -> Announcement {
+        guard let token = UserDefaults.standard.string(forKey: "authToken") else {
+            throw AuthError.invalidToken
+        }
+        
+        let url = URL(string: "\(baseURL)/createAnnouncement")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body = [
+            "token": token,
+            "content": content,
+            "eventId": eventId
+        ]
+        
+        request.httpBody = try JSONEncoder().encode(body)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        // Debug: Print the response JSON
+        if let jsonString = String(data: data, encoding: .utf8) {
+            print("Server response:", jsonString)
+        }
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            if let errorJson = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
+                print("Server error:", errorJson.error)
+            }
+            throw AuthError.serverError
+        }
+        
+        // Create a custom decoder with our date decoding strategy
+        let decoder = createDecoder()
+        
+        // Decode the server response which now includes the full sender object
+        struct ServerResponse: Codable {
+            let id: String
+            let sender: SenderResponse
+            let timeSent: Date
+            let content: String
+            let eventId: String
+            
+            struct SenderResponse: Codable {
+                let name: String
+                let profilePicture: String?
+                let email: String
+            }
+        }
+        
+        let serverResponse = try decoder.decode(ServerResponse.self, from: data)
+        
+        // Create the Announcement object using the full sender information
+        return Announcement(
+            id: serverResponse.id,
+            sender: AnnouncementSender(
+                email: serverResponse.sender.email,
+                name: serverResponse.sender.name,
+                profilePicture: serverResponse.sender.profilePicture
+            ),
+            timeSent: serverResponse.timeSent,
+            content: serverResponse.content
+        )
+    }
+
+    func addAnnouncement(_ announcement: Announcement, to event: Event) {
+        if var updatedEvent = selectedEvent {
+            updatedEvent.announcements.append(announcement)
+            
+            // Update the event in currentUser
+            if var user = currentUser,
+               let eventId = selectedEventId {
+                user.events[eventId] = updatedEvent
+                currentUser = user
+            }
+        }
+    }
+
+    @MainActor
+    func createEvent(title: String, startTime: Date, endTime: Date, timezone: String) async throws -> Event {
+        guard let token = UserDefaults.standard.string(forKey: "authToken") else {
+            throw AuthError.invalidToken
+        }
+        
+        let url = URL(string: "\(baseURL)/createEvent")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let parameters: [String: Any] = [
+            "token": token,
+            "title": title,
+            "startTime": formatDate(startTime),
+            "endTime": formatDate(endTime),
+            "timezone": timezone
+        ]
+        
+        request.httpBody = try JSONSerialization.data(withJSONObject: parameters)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            throw AuthError.serverError
+        }
+        
+        let decoder = createDecoder()
+        let event = try decoder.decode(Event.self, from: data)
+        
+        // Update the current user's events
+        if var user = currentUser {
+            user.events[event.id] = event
+            self.currentUser = user
+            self.selectedEventId = event.id
+        }
+        
+        return event
+    }
+
+    func deleteEvent(eventId: String) async throws {
+        guard let token = UserDefaults.standard.string(forKey: "authToken") else {
+            throw AuthError.invalidToken
+        }
+        
+        let url = URL(string: "\(baseURL)/deleteEvent")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let parameters = ["token": token, "eventId": eventId]
+        request.httpBody = try JSONEncoder().encode(parameters)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.invalidResponse
+        }
+        
+        if httpResponse.statusCode == 403 {
+            throw AuthError.notAuthorized
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            if let errorJson = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
+                print("Server error:", errorJson.error)
+            }
+            throw AuthError.serverError
+        }
+        
+        // Update local state
+        await MainActor.run {
+            if var user = currentUser {
+                user.events.removeValue(forKey: eventId)
+                currentUser = user
+                
+                // If the deleted event was selected, select another event
+                if selectedEventId == eventId {
+                    selectedEventId = user.events.first?.key
+                }
+            }
+        }
+    }
+
+    // Add this function to AuthManager class
+    func inviteUserToEvent(email: String, name: String, roleDescription: String?, eventId: String) async throws -> TeamMember {
+        guard let token = UserDefaults.standard.string(forKey: "authToken") else {
+            throw AuthError.invalidToken
+        }
+        
+        print("\n=== Inviting User to Event ===")
+        print("Email:", email)
+        print("Name:", name)
+        print("Role:", roleDescription ?? "none")
+        print("Event ID:", eventId)
+        
+        let url = URL(string: "\(baseURL)/inviteToEvent")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        var body: [String: Any] = [
+            "token": token,
+            "inviteeEmail": email,
+            "inviteeName": name,
+            "eventId": eventId
+        ]
+        
+        if let role = roleDescription {
+            body["roleDescription"] = role
+        }
+        
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        print("\nResponse received:")
+        if let jsonString = String(data: data, encoding: .utf8) {
+            print(jsonString)
+        }
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.invalidResponse
+        }
+        
+        if httpResponse.statusCode == 403 {
+            throw AuthError.notAuthorized
+        }
+        
+        if httpResponse.statusCode == 400 {
+            if let errorResponse = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
+                throw AuthError.userAlreadyInvited(errorResponse.error)
+            }
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AuthError.serverError
+        }
+        
+        let inviteResponse = try JSONDecoder().decode(InviteUserResponse.self, from: data)
+        print("\nSuccessfully decoded response:")
+        print("New team member:", inviteResponse.user)
+        
+        // Update the current user's selected event with the new team member
+        await MainActor.run {
+            if var user = currentUser,
+               var event = user.events[eventId] {
+                print("\nUpdating local state:")
+                print("Current team members:", event.teamMembers.map { $0.name })
+                event.teamMembers.append(inviteResponse.user)
+                user.events[eventId] = event
+                currentUser = user
+                print("Updated team members:", event.teamMembers.map { $0.name })
+                objectWillChange.send()
+            }
+        }
+        
+        return inviteResponse.user
+    }
+
+    // Add this new function to AuthManager
+    func checkUserExists(email: String) async throws -> (exists: Bool, name: String?) {
+        let encodedEmail = email.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? email
+        let url = URL(string: "\(baseURL)/checkUser/\(encodedEmail)")!
+        
+        let (data, response) = try await URLSession.shared.data(from: url)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AuthError.serverError
+        }
+        
+        struct CheckUserResponse: Codable {
+            let exists: Bool
+            let name: String?
+        }
+        
+        let result = try JSONDecoder().decode(CheckUserResponse.self, from: data)
+        return (result.exists, result.name)
     }
 }

@@ -37,12 +37,13 @@ struct ContentView: View {
                         .environmentObject(authManager)
                 }
             } else {
-                LoginView()
+                OnboardingView()
                     .environmentObject(authManager)
             }
         }
     }
 }
+
 
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View {

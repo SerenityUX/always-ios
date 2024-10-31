@@ -32,35 +32,24 @@ struct ProfilePictureResponse: Codable {
     let profilePictureUrl: String
 }
 
-enum AuthError: Error {
-    case invalidCredentials
-    case emailInUse
-    case invalidToken
-    case invalidResponse
-    case serverError
-    case invalidCode
-}
+
 
 // Event Models
 struct Event: Codable {
     let id: String
-    let title: String
-    let owner: String
-    let startTime: Date
-    let endTime: Date
+    var title: String
+    var owner: String
+    var startTime: Date
+    var endTime: Date
     var calendarEvents: [APICalendarEvent]
-    let teamMembers: [TeamMember]
+    var teamMembers: [TeamMember]
     var tasks: [EventTask]
+    var announcements: [Announcement]
     
     enum CodingKeys: String, CodingKey {
-        case id
-        case title
-        case owner
-        case startTime
-        case endTime
+        case id, title, owner, startTime, endTime
         case calendarEvents = "calendar_events"
-        case teamMembers
-        case tasks
+        case teamMembers, tasks, announcements
     }
     
     func tasksForUser(email: String) -> [EventTask] {
@@ -76,7 +65,15 @@ struct TeamMember: Codable {
     let name: String
     let profilePicture: String?
     let email: String
-    let roleDescription: String
+    let roleDescription: String?
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        profilePicture = try container.decodeIfPresent(String.self, forKey: .profilePicture)
+        email = try container.decode(String.self, forKey: .email)
+        roleDescription = try container.decodeIfPresent(String.self, forKey: .roleDescription) ?? ""
+    }
 }
 
 struct CalendarEvent: Identifiable {
@@ -207,4 +204,24 @@ struct AssignedUser: Codable {
     let name: String
     let profilePicture: String?
     let email: String
+}
+
+struct AnnouncementSender: Codable {
+    let email: String
+    let name: String
+    let profilePicture: String?
+}
+
+struct Announcement: Identifiable, Codable {
+    let id: String
+    let sender: AnnouncementSender
+    let timeSent: Date
+    let content: String
+}
+
+// Add this new response type
+struct InviteUserResponse: Codable {
+    let message: String
+    let isNewUser: Bool
+    let user: TeamMember
 }
