@@ -6,3 +6,8 @@
 //
 
 import Foundation
+
+enum Configuration {
+    static let oneSignalAppId = "6b2176f5-c274-4521-9290-78da52da584d"
+}
+

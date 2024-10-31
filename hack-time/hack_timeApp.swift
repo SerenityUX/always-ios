@@ -28,7 +28,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         OneSignal.Debug.setLogLevel(.LL_VERBOSE)
         
         // OneSignal initialization
-        OneSignal.initialize("6b2176f5-c274-4521-9290-78da52da584d", withLaunchOptions: launchOptions)
+        OneSignal.initialize(Configuration.oneSignalAppId, withLaunchOptions: launchOptions)
 
         // requestPermission will show the native iOS notification permission prompt.
         OneSignal.Notifications.requestPermission({ accepted in

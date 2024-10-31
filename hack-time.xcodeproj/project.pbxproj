@@ -13,6 +13,8 @@
 		43983F4B2CD2D69200B84695 /* OneSignalExtension in Frameworks */ = {isa = PBXBuildFile; productRef = 43983F4A2CD2D69200B84695 /* OneSignalExtension */; };
 		43983F4D2CD2D69200B84695 /* OneSignalFramework in Frameworks */ = {isa = PBXBuildFile; productRef = 43983F4C2CD2D69200B84695 /* OneSignalFramework */; };
 		43983F4F2CD2D69200B84695 /* OneSignalInAppMessages in Frameworks */ = {isa = PBXBuildFile; productRef = 43983F4E2CD2D69200B84695 /* OneSignalInAppMessages */; };
+		43983F512CD40FA600B84695 /* Configuration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43983F502CD40FA600B84695 /* Configuration.swift */; };
+		43983F532CD411A400B84695 /* wipetears.gif in Resources */ = {isa = PBXBuildFile; fileRef = 43983F522CD411A400B84695 /* wipetears.gif */; };
 		43ACD8472CD18F52007EEF94 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43ACD8462CD18F52007EEF94 /* Models.swift */; };
 		43ACD8492CD18F67007EEF94 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43ACD8482CD18F67007EEF94 /* AuthManager.swift */; };
 		43ACD84B2CD18F73007EEF94 /* AuthViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43ACD84A2CD18F73007EEF94 /* AuthViews.swift */; };
@@ -62,6 +64,8 @@
 		43983F3E2CD2D50300B84695 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		43983F402CD2D50300B84695 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		43983F482CD2D54100B84695 /* OneSignalNotificationServiceExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OneSignalNotificationServiceExtension.entitlements; sourceTree = "<group>"; };
+		43983F502CD40FA600B84695 /* Configuration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Configuration.swift; sourceTree = "<group>"; };
+		43983F522CD411A400B84695 /* wipetears.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = wipetears.gif; sourceTree = "<group>"; };
 		43ACD8462CD18F52007EEF94 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		43ACD8482CD18F67007EEF94 /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
 		43ACD84A2CD18F73007EEF94 /* AuthViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthViews.swift; sourceTree = "<group>"; };
@@ -115,6 +119,7 @@
 			isa = PBXGroup;
 			children = (
 				4391904E2CCECBDD00BC8A27 /* background.mp4 */,
+				43983F522CD411A400B84695 /* wipetears.gif */,
 				43F24FCD2CCB0074007A476B /* hack-time */,
 				43983F3D2CD2D50300B84695 /* OneSignalNotificationServiceExtension */,
 				43F24FCC2CCB0074007A476B /* Products */,
@@ -142,6 +147,7 @@
 				43ACD84E2CD18F8C007EEF94 /* ProfileViews.swift */,
 				43ACD8502CD18F98007EEF94 /* AnnouncementView.swift */,
 				43ACD8522CD18FA3007EEF94 /* MainContentView.swift */,
+				43983F502CD40FA600B84695 /* Configuration.swift */,
 				43ACD85A2CD29348007EEF94 /* TaskViews.swift */,
 				43ACD8542CD18FB4007EEF94 /* MediaUtils.swift */,
 				43ACD8562CD18FBF007EEF94 /* ViewModels.swift */,
@@ -261,6 +267,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4391904F2CCECBDD00BC8A27 /* background.mp4 in Resources */,
+				43983F532CD411A400B84695 /* wipetears.gif in Resources */,
 				43F24FD62CCB0075007A476B /* Preview Assets.xcassets in Resources */,
 				43F24FD32CCB0075007A476B /* Assets.xcassets in Resources */,
 			);
@@ -283,6 +290,7 @@
 			files = (
 				43ACD8552CD18FB4007EEF94 /* MediaUtils.swift in Sources */,
 				43ACD85B2CD29348007EEF94 /* TaskViews.swift in Sources */,
+				43983F512CD40FA600B84695 /* Configuration.swift in Sources */,
 				43ACD8472CD18F52007EEF94 /* Models.swift in Sources */,
 				43ACD8492CD18F67007EEF94 /* AuthManager.swift in Sources */,
 				43ACD84F2CD18F8C007EEF94 /* ProfileViews.swift in Sources */,
