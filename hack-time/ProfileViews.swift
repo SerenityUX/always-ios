@@ -415,20 +415,45 @@ struct CreateEventView: View {
                 Section(header: Text("Start (UTC)")) {
                     DatePicker("Date", selection: $startDate, displayedComponents: .date)
                         .environment(\.timeZone, TimeZone(identifier: "UTC")!)
+                        .onChange(of: startDate) { newDate in
+                            if endDate < newDate {
+                                endDate = newDate
+                            }
+                        }
                     DatePicker("Time", selection: $startTime, displayedComponents: .hourAndMinute)
                         .environment(\.timeZone, TimeZone(identifier: "UTC")!)
                         .onChange(of: startTime) { newTime in
-                            startTime = roundToHour(newTime)
+                            let roundedTime = roundToHour(newTime)
+                            startTime = roundedTime
+                            
+                            // If end time is before start time, update end time
+                            let calendar = Calendar.current
+                            if calendar.compare(endTime, to: roundedTime, toGranularity: .hour) == .orderedAscending {
+                                endTime = calendar.date(byAdding: .hour, value: 1, to: roundedTime) ?? roundedTime
+                            }
                         }
                 }
                 
                 Section(header: Text("End (UTC)")) {
                     DatePicker("Date", selection: $endDate, displayedComponents: .date)
                         .environment(\.timeZone, TimeZone(identifier: "UTC")!)
+                        .onChange(of: endDate) { newDate in
+                            if newDate < startDate {
+                                endDate = startDate
+                            }
+                        }
                     DatePicker("Time", selection: $endTime, displayedComponents: .hourAndMinute)
                         .environment(\.timeZone, TimeZone(identifier: "UTC")!)
                         .onChange(of: endTime) { newTime in
-                            endTime = roundToHour(newTime)
+                            let roundedTime = roundToHour(newTime)
+                            endTime = roundedTime
+                            
+                            // If end time is before start time on the same day, set it to start time + 1 hour
+                            let calendar = Calendar.current
+                            if calendar.isDate(endDate, inSameDayAs: startDate) &&
+                               calendar.compare(roundedTime, to: startTime, toGranularity: .hour) == .orderedAscending {
+                                endTime = calendar.date(byAdding: .hour, value: 1, to: startTime) ?? roundedTime
+                            }
                         }
                 }
 

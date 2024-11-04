@@ -62,26 +62,26 @@ struct EventView: View {
         .padding(.vertical, 8)
         .padding(.leading, 16)
         .offset(y: dragOffset)
-        .gesture(
-            DragGesture()
-                .onChanged { value in
-                    isDragging = true
-                    let proposedOffset = value.translation.height
-                    let snappedOffset = snapToNearestHour(offset: proposedOffset)
+        // .gesture(
+        //     DragGesture()
+        //         .onChanged { value in
+        //             isDragging = true
+        //             let proposedOffset = value.translation.height
+        //             let snappedOffset = snapToNearestHour(offset: proposedOffset)
                     
-                    if !wouldOverlap(with: snappedOffset) {
-                        dragOffset = snappedOffset
-                        impactMed.impactOccurred(intensity: 0.5)
-                    } else {
-                        notificationFeedback.notificationOccurred(.error)
-                    }
-                }
-                .onEnded { _ in
-                    isDragging = false
-                    updateEventTime()
-                    dragOffset = 0
-                }
-        )
+        //             if !wouldOverlap(with: snappedOffset) {
+        //                 dragOffset = snappedOffset
+        //                 impactMed.impactOccurred(intensity: 0.5)
+        //             } else {
+        //                 notificationFeedback.notificationOccurred(.error)
+        //             }
+        //         }
+        //         .onEnded { _ in
+        //             isDragging = false
+        //             updateEventTime()
+        //             dragOffset = 0
+        //         }
+        // )
         .animation(.interactiveSpring(), value: dragOffset)
         .onAppear {
             if isEditing {
