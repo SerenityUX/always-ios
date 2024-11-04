@@ -12,7 +12,7 @@ struct TokenResponse: Codable {
     let token: String
 }
 
-struct User: Codable {
+struct User: Codable, Equatable {
     let email: String
     let name: String
     var profilePictureUrl: String?
@@ -26,6 +26,14 @@ struct User: Codable {
         case token
         case events
     }
+    
+    static func == (lhs: User, rhs: User) -> Bool {
+        return lhs.email == rhs.email &&
+               lhs.name == rhs.name &&
+               lhs.profilePictureUrl == rhs.profilePictureUrl &&
+               lhs.token == rhs.token &&
+               lhs.events == rhs.events
+    }
 }
 
 struct ProfilePictureResponse: Codable {
@@ -35,7 +43,7 @@ struct ProfilePictureResponse: Codable {
 
 
 // Event Models
-struct Event: Codable {
+struct Event: Codable, Equatable {
     let id: String
     var title: String
     var owner: String
@@ -59,9 +67,21 @@ struct Event: Codable {
             }
         }
     }
+    
+    static func == (lhs: Event, rhs: Event) -> Bool {
+        return lhs.id == rhs.id &&
+               lhs.title == rhs.title &&
+               lhs.owner == rhs.owner &&
+               lhs.startTime == rhs.startTime &&
+               lhs.endTime == rhs.endTime &&
+               lhs.calendarEvents == rhs.calendarEvents &&
+               lhs.teamMembers == rhs.teamMembers &&
+               lhs.tasks == rhs.tasks &&
+               lhs.announcements == rhs.announcements
+    }
 }
 
-struct TeamMember: Codable {
+struct TeamMember: Codable, Equatable {
     let name: String
     let profilePicture: String?
     let email: String
@@ -92,7 +112,7 @@ struct CalendarEvent: Identifiable {
     }
 }
 
-struct APICalendarEvent: Codable {
+struct APICalendarEvent: Codable, Equatable {
     var id: String
     var title: String
     var startTime: Date
@@ -162,7 +182,7 @@ struct ErrorResponse: Codable {
     let error: String
 }
 
-struct EventTask: Codable {
+struct EventTask: Codable, Equatable {
     let id: String
     var title: String
     var description: String
@@ -200,19 +220,19 @@ struct EventTask: Codable {
     }
 }
 
-struct AssignedUser: Codable {
+struct AssignedUser: Codable, Equatable {
     let name: String
     let profilePicture: String?
     let email: String
 }
 
-struct AnnouncementSender: Codable {
+struct AnnouncementSender: Codable, Equatable {
     let email: String
     let name: String
     let profilePicture: String?
 }
 
-struct Announcement: Identifiable, Codable {
+struct Announcement: Identifiable, Codable, Equatable {
     let id: String
     let sender: AnnouncementSender
     let timeSent: Date

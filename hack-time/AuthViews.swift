@@ -21,7 +21,7 @@ struct OnboardingView: View {
                     .edgesIgnoringSafeArea(.all)
                 
                 VStack {
-                    Text("Build Time")
+                    Text("Hack Mind")
                         .font(.system(size: 64))
                         .foregroundColor(.white)
                         .fontWeight(.bold)
@@ -170,6 +170,15 @@ struct LoginView: View {
                 }
                 
                 Spacer()
+                
+                HStack(spacing: 4) {
+                    Text("By logging in, you agree to our")
+                        .font(.footnote)
+                        .foregroundColor(.gray)
+                    Link("Terms and Conditions", destination: URL(string: "https://serenidad.click/hacktime/privacy-toc")!)
+                        .font(.footnote)
+                }
+                .padding(.bottom, 16)
             }
         }
         .onAppear {
@@ -347,6 +356,15 @@ struct SignupView: View {
                 .disabled(isLoading)
                 
                 Spacer()
+                
+                HStack(spacing: 4) {
+                    Text("By signing up, you agree to our")
+                        .font(.footnote)
+                        .foregroundColor(.gray)
+                    Link("Terms and Conditions", destination: URL(string: "https://serenidad.click/hacktime/privacy-toc")!)
+                        .font(.footnote)
+                }
+                .padding(.bottom, 16)
             }
         }
         .onAppear {

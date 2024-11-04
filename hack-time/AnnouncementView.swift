@@ -83,7 +83,8 @@ struct AnnouncementModalView: View {
                     .focused($isFocused)
                     .lineLimit(1...5)
                     .onSubmit {
-                        if !newMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        let trimmedMessage = newMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmedMessage.isEmpty {
                             sendAnnouncement()
                         }
                     }

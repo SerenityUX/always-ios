@@ -18,6 +18,7 @@ enum AuthError: Error {
     case invalidCode
     case notAuthorized
     case userAlreadyInvited(String)
+    case deleteAccountConfirmationMismatch
     
     var localizedDescription: String {
         switch self {
@@ -37,6 +38,8 @@ enum AuthError: Error {
             return "You are not authorized to perform this action"
         case .userAlreadyInvited(let message):
             return message
+        case .deleteAccountConfirmationMismatch:
+            return "Confirmation text doesn't match 'DELETE ACCOUNT'"
         }
     }
 }
@@ -45,11 +48,18 @@ class AuthManager: ObservableObject {
     @Published var isAuthenticated = false
     @Published var error: String?
     @Published var isLoading = false
-    @Published var currentUser: User?
+    @Published var currentUser: User? {
+        didSet {
+            if oldValue != currentUser {
+                handleChange()
+            }
+        }
+    }
     @Published var selectedEventId: String? {
         didSet {
             if let eventId = selectedEventId {
                 UserDefaults.standard.set(eventId, forKey: "selectedEventId")
+                handleChange()
             } else {
                 UserDefaults.standard.removeObject(forKey: "selectedEventId")
             }
@@ -58,12 +68,16 @@ class AuthManager: ObservableObject {
 
     private let baseURL = "https://serenidad.click/hacktime"
 
+    private var refreshTimer: Timer?
+    private let refreshDelay: TimeInterval = 30 // 30 seconds
+
     init() {
         // Check for saved auth token
         if let token = UserDefaults.standard.string(forKey: "authToken") {
             isAuthenticated = true  // Set this to true if we have a token
+            
             // Load the saved event ID
-            selectedEventId = UserDefaults.standard.string(forKey: "selectedEventId")
+            let savedEventId = UserDefaults.standard.string(forKey: "selectedEventId")
             
             // Validate token and load user data
             Task {
@@ -71,9 +85,15 @@ class AuthManager: ObservableObject {
                     let userData = try await validateToken(token)
                     await MainActor.run {
                         self.currentUser = userData
-                        // If no event is selected, default to first event
-                        if self.selectedEventId == nil {
+                        
+                        // Validate saved event ID exists in user's events
+                        if let savedId = savedEventId, userData.events[savedId] != nil {
+                            self.selectedEventId = savedId
+                        } else if !userData.events.isEmpty {
+                            // If saved ID is invalid or missing, use the first event
                             self.selectedEventId = userData.events.first?.key
+                            // Save the new selection
+                            UserDefaults.standard.set(self.selectedEventId, forKey: "selectedEventId")
                         }
                     }
                 } catch {
@@ -81,10 +101,19 @@ class AuthManager: ObservableObject {
                     await MainActor.run {
                         self.isAuthenticated = false
                         UserDefaults.standard.removeObject(forKey: "authToken")
+                        UserDefaults.standard.removeObject(forKey: "selectedEventId")
                     }
                 }
             }
         }
+
+        // Start observing for changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleChangeNotification),
+            name: NSNotification.Name("RefreshCalendarEvents"),
+            object: nil
+        )
     }
 
     var selectedEvent: Event? {
@@ -200,6 +229,19 @@ class AuthManager: ObservableObject {
         }
         
         let result = try JSONDecoder().decode(TokenResponse.self, from: data)
+        
+        // After successful login, validate token to get user data
+        let userData = try await validateToken(result.token)
+        
+        await MainActor.run {
+            self.currentUser = userData
+            
+            // Set the first event as selected if user has any events
+            if let firstEventId = userData.events.first?.key {
+                self.selectedEventId = firstEventId
+                UserDefaults.standard.set(firstEventId, forKey: "selectedEventId")
+            }
+        }
         
         // Set OneSignal external user ID after successful login
         setOneSignalExternalId(email)
@@ -375,12 +417,20 @@ class AuthManager: ObservableObject {
     }
     
     func updateCalendarEvent(calendarEventId: String, title: String?, startTime: Date?, endTime: Date?, color: String?) async throws -> PartialCalendarEventResponse {
+        print("\n=== AuthManager: Update Calendar Event ===")
+        print("Calendar Event ID:", calendarEventId)
+        print("New Title:", title ?? "nil")
+        print("New Start Time:", startTime.map { formatDate($0) } ?? "nil")
+        print("New End Time:", endTime.map { formatDate($0) } ?? "nil")
+        print("New Color:", color ?? "nil")
+        
         let url = URL(string: "\(baseURL)/updateCalendarEvent")!
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
         guard let token = UserDefaults.standard.string(forKey: "authToken") else {
+            print("Error: No auth token found")
             throw AuthError.invalidToken
         }
         
@@ -392,20 +442,22 @@ class AuthManager: ObservableObject {
         
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         
-        print("Request body:", String(data: request.httpBody!, encoding: .utf8) ?? "")
+        print("\nRequest body:", String(data: request.httpBody!, encoding: .utf8) ?? "")
         
         let (data, response) = try await URLSession.shared.data(for: request)
         
         // Log the raw response
+        print("\nResponse received:")
         if let jsonString = String(data: data, encoding: .utf8) {
-            print("Raw API Response:", jsonString)
+            print(jsonString)
         }
         
         guard let httpResponse = response as? HTTPURLResponse else {
+            print("Error: Invalid response type")
             throw AuthError.invalidResponse
         }
         
-        print("Response status code:", httpResponse.statusCode)
+        print("\nResponse status code:", httpResponse.statusCode)
         
         guard httpResponse.statusCode == 200 else {
             if let errorJson = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
@@ -417,7 +469,7 @@ class AuthManager: ObservableObject {
         do {
             let decoder = createDecoder()
             let response = try decoder.decode(PartialCalendarEventResponse.self, from: data)
-            print("Successfully decoded response:", response)
+            print("\nSuccessfully decoded response:", response)
             return response
         } catch {
             print("Decoding error:", error)
@@ -427,27 +479,56 @@ class AuthManager: ObservableObject {
     }
     
     func deleteCalendarEvent(calendarEventId: String) async throws {
+        print("\n=== AuthManager: Delete Calendar Event ===")
+        print("Calendar Event ID:", calendarEventId)
+        
         let url = URL(string: "\(baseURL)/deleteCalendarEvent")!
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
         guard let token = UserDefaults.standard.string(forKey: "authToken") else {
+            print("Error: No auth token found")
             throw AuthError.invalidToken
         }
         
         let body = ["token": token, "calendarEventId": calendarEventId]
         request.httpBody = try JSONEncoder().encode(body)
         
-        let (_, response) = try await URLSession.shared.data(for: request)
+        print("\nSending delete request with body:", String(data: request.httpBody!, encoding: .utf8) ?? "")
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
         
         guard let httpResponse = response as? HTTPURLResponse else {
+            print("Error: Invalid response type")
             throw AuthError.invalidResponse
         }
         
+        print("\nResponse status code:", httpResponse.statusCode)
+        
+        if let responseString = String(data: data, encoding: .utf8) {
+            print("Response body:", responseString)
+        }
+        
+        if httpResponse.statusCode == 404 {
+            print("Error: Calendar event not found")
+            throw AuthError.invalidResponse
+        }
+        
+        if httpResponse.statusCode == 403 {
+            print("Error: Not authorized to delete this event")
+            throw AuthError.notAuthorized
+        }
+        
         guard httpResponse.statusCode == 200 else {
+            if let errorJson = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
+                print("Server error:", errorJson.error)
+            }
             throw AuthError.serverError
         }
+        
+        print("Delete request successful")
+        print("===========================\n")
     }
     
     private func formatDate(_ date: Date) -> String {
@@ -622,24 +703,27 @@ class AuthManager: ObservableObject {
     }
 
     func updateCalendarEventInState(eventId: String, calendarEventId: String, updates: (inout APICalendarEvent) -> Void) {
-        print("--- State Update Debug ---")
-        print("Before update:")
-        print("Current user events:", currentUser?.events.keys.joined(separator: ", ") ?? "nil")
-        print("Selected event ID:", selectedEventId ?? "nil")
-        print("Selected event calendar events:", selectedEvent?.calendarEvents.map { $0.id }.joined(separator: ", ") ?? "nil")
+        print("\n=== Updating Calendar Event State ===")
+        print("Event ID:", eventId)
+        print("Calendar Event ID:", calendarEventId)
+        print("Calendar Event ID (lowercase):", calendarEventId.lowercased())
         
         if var user = currentUser,
            var selectedEvent = user.events[eventId] {
+            print("\nCurrent state:")
+            print("Event count:", selectedEvent.calendarEvents.count)
+            print("Calendar events:", selectedEvent.calendarEvents.map { 
+                "ID: \($0.id) (\($0.id.lowercased()))" 
+            })
+            
+            // Find the calendar event, ignoring case
             if let calendarEventIndex = selectedEvent.calendarEvents.firstIndex(where: { 
-                $0.id.lowercased() == calendarEventId.lowercased() 
+                $0.id.lowercased() == calendarEventId.lowercased()  // Case-insensitive comparison
             }) {
                 print("\nFound calendar event at index:", calendarEventIndex)
-                print("Before color:", selectedEvent.calendarEvents[calendarEventIndex].color)
                 
                 // Apply the updates
                 updates(&selectedEvent.calendarEvents[calendarEventIndex])
-                
-                print("After color:", selectedEvent.calendarEvents[calendarEventIndex].color)
                 
                 // Update the event in the user's dictionary
                 user.events[eventId] = selectedEvent
@@ -657,26 +741,32 @@ class AuthManager: ObservableObject {
                     selectedEventId = currentEventId
                 }
                 
-                print("\nAfter update:")
-                print("Updated event calendar events:", selectedEvent.calendarEvents.map { $0.id }.joined(separator: ", "))
-                print("Current selected event calendar events:", self.selectedEvent?.calendarEvents.map { $0.id }.joined(separator: ", ") ?? "nil")
+                print("\nState updated successfully")
+                print("Updated event calendar events:", selectedEvent.calendarEvents.map { 
+                    "ID: \($0.id), Title: \($0.title), Start: \(formatDate($0.startTime))" 
+                })
                 
                 // Notify any listening views that they should update
                 NotificationCenter.default.post(
                     name: NSNotification.Name("RefreshCalendarEvents"), 
                     object: nil,
-                    userInfo: ["eventId": eventId, "calendarEventId": calendarEventId]
+                    userInfo: ["eventId": eventId, "calendarEventId": calendarEventId.lowercased()]  // Use lowercase ID
                 )
             } else {
                 print("\nError: Could not find calendar event with ID:", calendarEventId)
-                print("Available IDs:", selectedEvent.calendarEvents.map { $0.id })
+                print("Available IDs:", selectedEvent.calendarEvents.map { 
+                    "ID: \($0.id) (lowercase: \($0.id.lowercased()))" 
+                })
             }
         } else {
             print("\nError: Could not find user or selected event")
             print("User exists:", currentUser != nil)
             print("Event ID exists:", eventId)
+            if let user = currentUser {
+                print("Available events:", user.events.keys.joined(separator: ", "))
+            }
         }
-        print("------------------------")
+        print("===========================\n")
     }
 
     func logout() {
@@ -957,5 +1047,77 @@ class AuthManager: ObservableObject {
         
         let result = try JSONDecoder().decode(CheckUserResponse.self, from: data)
         return (result.exists, result.name)
+    }
+
+    // Add new method to AuthManager class
+    func deleteAccount() async throws {
+        guard let token = UserDefaults.standard.string(forKey: "authToken") else {
+            throw AuthError.invalidToken
+        }
+        
+        let url = URL(string: "\(baseURL)/deleteAccount")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body = ["token": token]
+        request.httpBody = try JSONEncoder().encode(body)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.invalidResponse
+        }
+        
+        if httpResponse.statusCode == 401 {
+            throw AuthError.invalidToken
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AuthError.serverError
+        }
+        
+        // Clear OneSignal external user ID
+        OneSignal.logout()
+        
+        // Clear local storage
+        UserDefaults.standard.removeObject(forKey: "authToken")
+        UserDefaults.standard.removeObject(forKey: "selectedEventId")
+    }
+
+    private func handleChange() {
+        // Cancel any existing timer
+        refreshTimer?.invalidate()
+        
+        // Create new timer
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: refreshDelay, repeats: false) { [weak self] _ in
+            Task {
+                await self?.refreshUserData()
+            }
+        }
+    }
+
+    @MainActor
+    private func refreshUserData() {
+        guard let token = UserDefaults.standard.string(forKey: "authToken") else { return }
+        
+        Task {
+            do {
+                let userData = try await validateToken(token)
+                self.currentUser = userData
+                print("Auto-refreshed user data")
+            } catch {
+                print("Auto-refresh failed:", error)
+            }
+        }
+    }
+
+    @objc private func handleChangeNotification() {
+        handleChange()
+    }
+
+    deinit {
+        refreshTimer?.invalidate()
+        NotificationCenter.default.removeObserver(self)
     }
 }

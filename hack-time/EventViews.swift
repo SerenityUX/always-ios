@@ -237,12 +237,14 @@ struct EventView: View {
                     
                     await MainActor.run {
                         print("\nAPI Response successful, updating state")
-                        // Update local events array
-                        print("\nUpdating local events array at index:", index)
-                        events[index].startTime = newStartTime
-                        events[index].endTime = newEndTime
+                        // Update local events array with response data
+                        if let index = events.firstIndex(where: { $0.id == event.id }) {
+                            print("\nUpdating local events array at index:", index)
+                            events[index].startTime = updatedEvent.startTime ?? events[index].startTime
+                            events[index].endTime = updatedEvent.endTime ?? events[index].endTime
+                        }
                         
-                        // Update AuthManager state
+                        // Update AuthManager state with response data
                         if let eventId = authManager.selectedEventId {
                             print("\nUpdating AuthManager state for event:", eventId)
                             authManager.updateCalendarEventInState(
@@ -251,23 +253,30 @@ struct EventView: View {
                             ) { calendarEvent in
                                 print("Previous times - Start:", formatTime(date: calendarEvent.startTime))
                                 print("Previous times - End:", formatTime(date: calendarEvent.endTime))
-                                calendarEvent.startTime = newStartTime
-                                calendarEvent.endTime = newEndTime
+                                // Use the response data to update the state
+                                if let newStartTime = updatedEvent.startTime {
+                                    calendarEvent.startTime = newStartTime
+                                }
+                                if let newEndTime = updatedEvent.endTime {
+                                    calendarEvent.endTime = newEndTime
+                                }
                                 print("New times - Start:", formatTime(date: calendarEvent.startTime))
                                 print("New times - End:", formatTime(date: calendarEvent.endTime))
                             }
                             
-                            // Force a UI refresh
+                            // Force UI updates
                             authManager.objectWillChange.send()
-                        } else {
-                            print("Error: No selected event ID in AuthManager")
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("RefreshCalendarEvents"),
+                                object: nil,
+                                userInfo: [
+                                    "eventId": eventId,
+                                    "calendarEventId": event.id.uuidString,
+                                    "startTime": updatedEvent.startTime as Any,
+                                    "endTime": updatedEvent.endTime as Any
+                                ]
+                            )
                         }
-                        
-                        print("\nFinal state check:")
-                        print("Selected event calendar events:", 
-                              authManager.selectedEvent?.calendarEvents
-                                .map { "ID: \($0.id), Start: \(formatTime(date: $0.startTime)), End: \(formatTime(date: $0.endTime))" }
-                                .joined(separator: "\n  ") ?? "nil")
                         
                         impactMed.impactOccurred(intensity: 0.5)
                     }
@@ -510,7 +519,22 @@ struct EventDetailModalView: View {
                 .padding(.vertical)
             }
             
-            Spacer()
+            // Add this new button section at the bottom
+            if event.title.isEmpty {  // Only show for new events
+                Button(action: {
+                    updateEventTitle()
+                    presentationMode.wrappedValue.dismiss()
+                }) {
+                    Text("Create")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                }
+                .background(Color.blue)
+                .cornerRadius(10)
+                .padding()
+            }
         }
         .background(Color(UIColor.systemBackground))
         .edgesIgnoringSafeArea(.bottom)
@@ -545,28 +569,69 @@ struct EventDetailModalView: View {
     }
     
     private func deleteEvent() {
-        if let index = events.firstIndex(where: { $0.id == event.id }) {
-            Task {
-                do {
-                    try await authManager.deleteCalendarEvent(calendarEventId: event.id.uuidString)
-                    await MainActor.run {
+        print("\n=== Deleting Calendar Event ===")
+        print("Event ID to delete:", event.id.uuidString)
+        print("Selected Event ID:", authManager.selectedEventId ?? "nil")
+        
+        Task {
+            do {
+                print("\nSending delete request to API")
+                try await authManager.deleteCalendarEvent(calendarEventId: event.id.uuidString)
+                
+                await MainActor.run {
+                    print("\nAPI delete successful, updating state")
+                    
+                    // Remove from local events array
+                    if let index = events.firstIndex(where: { $0.id == event.id }) {
+                        print("Removing event from local events array at index:", index)
                         events.remove(at: index)
-                        if var user = authManager.currentUser,
-                           let eventId = authManager.selectedEventId,
-                           var selectedEvent = user.events[eventId] {
-                            selectedEvent.calendarEvents.removeAll { $0.id == event.id.uuidString }
-                            user.events[eventId] = selectedEvent
-                            authManager.currentUser = user
-                        }
-                        impactMed.impactOccurred()
-                        presentationMode.wrappedValue.dismiss()
+                    } else {
+                        print("Warning: Event not found in local events array")
                     }
-                } catch {
-                    print("Failed to delete event:", error)
-                    notificationFeedback.notificationOccurred(.error)
+                    
+                    // Update AuthManager state
+                    if var user = authManager.currentUser,
+                       let eventId = authManager.selectedEventId,
+                       var selectedEvent = user.events[eventId] {
+                        print("\nUpdating AuthManager state")
+                        print("Before removal - Calendar events count:", selectedEvent.calendarEvents.count)
+                        
+                        // Remove the calendar event
+                        selectedEvent.calendarEvents.removeAll { 
+                            print("Comparing: \($0.id) with \(event.id.uuidString)")
+                            return $0.id.lowercased() == event.id.uuidString.lowercased() 
+                        }
+                        
+                        print("After removal - Calendar events count:", selectedEvent.calendarEvents.count)
+                        
+                        // Update the event in the user's dictionary
+                        user.events[eventId] = selectedEvent
+                        
+                        // Force a complete state refresh
+                        authManager.currentUser = nil  // Force a clean state
+                        authManager.currentUser = user // Reassign to trigger update
+                        
+                        // Notify views to refresh
+                        authManager.objectWillChange.send()
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("RefreshCalendarEvents"),
+                            object: nil
+                        )
+                    } else {
+                        print("Error: Could not update AuthManager state")
+                        print("Current user exists:", authManager.currentUser != nil)
+                        print("Selected event ID exists:", authManager.selectedEventId != nil)
+                    }
+                    
+                    impactMed.impactOccurred()
+                    presentationMode.wrappedValue.dismiss()
                 }
+            } catch {
+                print("\nError deleting event:", error)
+                notificationFeedback.notificationOccurred(.error)
             }
         }
+        print("===========================\n")
     }
     
     private func updateEventTitle() {
