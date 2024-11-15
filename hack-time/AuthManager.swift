@@ -418,21 +418,23 @@ class AuthManager: ObservableObject {
     
     func updateCalendarEvent(calendarEventId: String, title: String?, startTime: Date?, endTime: Date?, color: String?) async throws -> PartialCalendarEventResponse {
         print("\n=== AuthManager: Update Calendar Event ===")
+        print("Request Details:")
         print("Calendar Event ID:", calendarEventId)
         print("New Title:", title ?? "nil")
         print("New Start Time:", startTime.map { formatDate($0) } ?? "nil")
         print("New End Time:", endTime.map { formatDate($0) } ?? "nil")
         print("New Color:", color ?? "nil")
         
-        let url = URL(string: "\(baseURL)/updateCalendarEvent")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "PUT"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
         guard let token = UserDefaults.standard.string(forKey: "authToken") else {
             print("Error: No auth token found")
             throw AuthError.invalidToken
         }
+        print("Auth token found:", token.prefix(10) + "...")
+        
+        let url = URL(string: "\(baseURL)/updateCalendarEvent")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
         var body: [String: Any] = ["token": token, "calendarEventId": calendarEventId]
         if let title = title { body["title"] = title }
@@ -444,13 +446,12 @@ class AuthManager: ObservableObject {
         
         print("\nRequest body:", String(data: request.httpBody!, encoding: .utf8) ?? "")
         
+        print("\nSending request to:", url.absoluteString)
         let (data, response) = try await URLSession.shared.data(for: request)
         
         // Log the raw response
         print("\nResponse received:")
-        if let jsonString = String(data: data, encoding: .utf8) {
-            print(jsonString)
-        }
+        print("Raw response data:", String(data: data, encoding: .utf8) ?? "")
         
         guard let httpResponse = response as? HTTPURLResponse else {
             print("Error: Invalid response type")
@@ -458,21 +459,28 @@ class AuthManager: ObservableObject {
         }
         
         print("\nResponse status code:", httpResponse.statusCode)
+        print("Response headers:", httpResponse.allHeaderFields)
         
         guard httpResponse.statusCode == 200 else {
             if let errorJson = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
                 print("Server error:", errorJson.error)
             }
+            print("Error: Non-200 status code received")
             throw AuthError.serverError
         }
         
         do {
             let decoder = createDecoder()
+            print("\nAttempting to decode response...")
             let response = try decoder.decode(PartialCalendarEventResponse.self, from: data)
-            print("\nSuccessfully decoded response:", response)
+            print("Successfully decoded response:")
+            print("- Start Time:", response.startTime.map { formatDate($0) } ?? "nil")
+            print("- End Time:", response.endTime.map { formatDate($0) } ?? "nil")
+            print("- Title:", response.title ?? "nil")
+            print("- Color:", response.color ?? "nil")
             return response
         } catch {
-            print("Decoding error:", error)
+            print("\nDecoding error:", error)
             print("Decoding error details:", (error as? DecodingError).map { "\($0)" } ?? "Unknown error")
             throw error
         }

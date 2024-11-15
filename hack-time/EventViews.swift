@@ -213,20 +213,30 @@ struct EventView: View {
         print("\n=== Event Time Update (Drag) ===")
         print("Event ID:", event.id.uuidString)
         print("Selected Event ID:", authManager.selectedEventId ?? "nil")
+        print("Current Event State:")
+        print("- Start Time:", formatTime(date: event.startTime))
+        print("- End Time:", formatTime(date: event.endTime))
+        print("- Drag Offset:", dragOffset)
         
         if let index = events.firstIndex(where: { $0.id == event.id }) {
             let minutesToAdd = Int(dragOffset / 72.0 * 60)
             let newStartTime = Calendar.current.date(byAdding: .minute, value: minutesToAdd, to: event.startTime)!
             let newEndTime = Calendar.current.date(byAdding: .minute, value: minutesToAdd, to: event.endTime)!
             
-            print("Current drag offset:", dragOffset)
+            print("\nCalculated New Times:")
             print("Minutes to add:", minutesToAdd)
             print("New start time:", formatTime(date: newStartTime))
             print("New end time:", formatTime(date: newEndTime))
+            print("Local events array count:", events.count)
             
             Task {
                 do {
                     print("\nSending API request to update times")
+                    print("Request details:")
+                    print("- Calendar Event ID:", event.id.uuidString)
+                    print("- New Start Time:", formatTime(date: newStartTime))
+                    print("- New End Time:", formatTime(date: newEndTime))
+                    
                     let updatedEvent = try await authManager.updateCalendarEvent(
                         calendarEventId: event.id.uuidString,
                         title: nil,
@@ -235,13 +245,29 @@ struct EventView: View {
                         color: nil
                     )
                     
+                    print("\nAPI Response received:")
+                    print("- Response Start Time:", updatedEvent.startTime.map { formatTime(date: $0) } ?? "nil")
+                    print("- Response End Time:", updatedEvent.endTime.map { formatTime(date: $0) } ?? "nil")
+                    
                     await MainActor.run {
-                        print("\nAPI Response successful, updating state")
+                        print("\nUpdating UI state on main thread")
                         // Update local events array with response data
                         if let index = events.firstIndex(where: { $0.id == event.id }) {
                             print("\nUpdating local events array at index:", index)
-                            events[index].startTime = updatedEvent.startTime ?? events[index].startTime
-                            events[index].endTime = updatedEvent.endTime ?? events[index].endTime
+                            print("Before update:")
+                            print("- Start Time:", formatTime(date: events[index].startTime))
+                            print("- End Time:", formatTime(date: events[index].endTime))
+                            
+                            if let newStart = updatedEvent.startTime {
+                                events[index].startTime = newStart
+                            }
+                            if let newEnd = updatedEvent.endTime {
+                                events[index].endTime = newEnd
+                            }
+                            
+                            print("After update:")
+                            print("- Start Time:", formatTime(date: events[index].startTime))
+                            print("- End Time:", formatTime(date: events[index].endTime))
                         }
                         
                         // Update AuthManager state with response data
@@ -251,20 +277,23 @@ struct EventView: View {
                                 eventId: eventId,
                                 calendarEventId: event.id.uuidString
                             ) { calendarEvent in
-                                print("Previous times - Start:", formatTime(date: calendarEvent.startTime))
-                                print("Previous times - End:", formatTime(date: calendarEvent.endTime))
-                                // Use the response data to update the state
+                                print("Previous times:")
+                                print("- Start:", formatTime(date: calendarEvent.startTime))
+                                print("- End:", formatTime(date: calendarEvent.endTime))
+                                
                                 if let newStartTime = updatedEvent.startTime {
                                     calendarEvent.startTime = newStartTime
                                 }
                                 if let newEndTime = updatedEvent.endTime {
                                     calendarEvent.endTime = newEndTime
                                 }
-                                print("New times - Start:", formatTime(date: calendarEvent.startTime))
-                                print("New times - End:", formatTime(date: calendarEvent.endTime))
+                                
+                                print("Updated times:")
+                                print("- Start:", formatTime(date: calendarEvent.startTime))
+                                print("- End:", formatTime(date: calendarEvent.endTime))
                             }
                             
-                            // Force UI updates
+                            print("\nTriggering UI updates")
                             authManager.objectWillChange.send()
                             NotificationCenter.default.post(
                                 name: NSNotification.Name("RefreshCalendarEvents"),
@@ -282,12 +311,17 @@ struct EventView: View {
                     }
                 } catch {
                     print("\nError updating event times:", error)
+                    print("Error details:", (error as NSError).localizedDescription)
                     notificationFeedback.notificationOccurred(.error)
                     // Revert times on error
                     events[index].startTime = event.startTime
                     events[index].endTime = event.endTime
                 }
             }
+        } else {
+            print("Error: Could not find event in local events array")
+            print("Event ID being searched:", event.id.uuidString)
+            print("Available event IDs:", events.map { $0.id.uuidString })
         }
         print("=======================\n")
     }
@@ -800,88 +834,125 @@ struct EventDetailModalView: View {
     }
     
     private func updateEventTimes() {
-        print("\n=== Event Time Update ===")
-        print("Updating event times:")
+        print("\n=== Event Time Update (Modal) ===")
         print("Event ID:", event.id.uuidString)
         print("Selected Event ID:", authManager.selectedEventId ?? "nil")
-        print("Current Start Time:", formatTime(date: currentStartTime))
-        print("Current End Time:", formatTime(date: currentEndTime))
+        print("Current Event State:")
+        print("- Original Start Time:", formatTime(date: event.startTime))
+        print("- Original End Time:", formatTime(date: event.endTime))
+        print("- New Start Time:", formatTime(date: currentStartTime))
+        print("- New End Time:", formatTime(date: currentEndTime))
         
-        if let index = events.firstIndex(where: { $0.id == event.id }) {
-            if currentEndTime <= currentStartTime {
-                print("Error: End time must be after start time")
-                notificationFeedback.notificationOccurred(.error)
-                currentStartTime = events[index].startTime
-                currentEndTime = events[index].endTime
-                return
-            }
-            
-            let wouldOverlap = events.contains { otherEvent in
-                guard otherEvent.id != event.id else { return false }
-                return (currentStartTime < otherEvent.endTime && 
-                        currentEndTime > otherEvent.startTime)
-            }
-            
-            if wouldOverlap {
-                print("Error: Time range would overlap with another event")
-                notificationFeedback.notificationOccurred(.error)
-                currentStartTime = events[index].startTime
-                currentEndTime = events[index].endTime
-                return
-            }
-            
-            Task {
-                do {
-                    print("\nSending API request to update times")
-                    let updatedEvent = try await authManager.updateCalendarEvent(
-                        calendarEventId: event.id.uuidString,
-                        title: nil,
-                        startTime: currentStartTime,
-                        endTime: currentEndTime,
-                        color: nil
-                    )
-                    
-                    await MainActor.run {
-                        print("\nAPI Response successful, updating state")
-                        // Update local events array
-                        events[index].startTime = currentStartTime
-                        events[index].endTime = currentEndTime
+        // Validate times
+        if currentEndTime <= currentStartTime {
+            print("Error: End time must be after start time")
+            notificationFeedback.notificationOccurred(.error)
+            currentStartTime = event.startTime
+            currentEndTime = event.endTime
+            return
+        }
+        
+        // Check for overlaps
+        let wouldOverlap = events.contains { otherEvent in
+            guard otherEvent.id != event.id else { return false }
+            return (currentStartTime < otherEvent.endTime && currentEndTime > otherEvent.startTime)
+        }
+        
+        if wouldOverlap {
+            print("Error: Time range would overlap with another event")
+            notificationFeedback.notificationOccurred(.error)
+            currentStartTime = event.startTime
+            currentEndTime = event.endTime
+            return
+        }
+        
+        Task {
+            do {
+                print("\nSending API request to update times")
+                print("Request details:")
+                print("- Calendar Event ID:", event.id.uuidString)
+                print("- New Start Time:", formatTime(date: currentStartTime))
+                print("- New End Time:", formatTime(date: currentEndTime))
+                
+                let updatedEvent = try await authManager.updateCalendarEvent(
+                    calendarEventId: event.id.uuidString,
+                    title: nil,
+                    startTime: currentStartTime,
+                    endTime: currentEndTime,
+                    color: nil
+                )
+                
+                print("\nAPI Response received:")
+                print("- Response Start Time:", updatedEvent.startTime.map { formatTime(date: $0) } ?? "nil")
+                print("- Response End Time:", updatedEvent.endTime.map { formatTime(date: $0) } ?? "nil")
+                
+                await MainActor.run {
+                    print("\nUpdating UI state on main thread")
+                    // Update local events array
+                    if let index = events.firstIndex(where: { $0.id == event.id }) {
+                        print("\nUpdating local events array at index:", index)
+                        print("Before update:")
+                        print("- Start Time:", formatTime(date: events[index].startTime))
+                        print("- End Time:", formatTime(date: events[index].endTime))
                         
-                        // Update AuthManager state
-                        if let eventId = authManager.selectedEventId {
-                            print("\nUpdating AuthManager state for event:", eventId)
-                            authManager.updateCalendarEventInState(
-                                eventId: eventId,
-                                calendarEventId: event.id.uuidString
-                            ) { calendarEvent in
-                                print("Previous times - Start:", formatTime(date: calendarEvent.startTime), "End:", formatTime(date: calendarEvent.endTime))
-                                calendarEvent.startTime = currentStartTime
-                                calendarEvent.endTime = currentEndTime
-                                print("New times - Start:", formatTime(date: calendarEvent.startTime), "End:", formatTime(date: calendarEvent.endTime))
+                        if let newStart = updatedEvent.startTime {
+                            events[index].startTime = newStart
+                        }
+                        if let newEnd = updatedEvent.endTime {
+                            events[index].endTime = newEnd
+                        }
+                        
+                        print("After update:")
+                        print("- Start Time:", formatTime(date: events[index].startTime))
+                        print("- End Time:", formatTime(date: events[index].endTime))
+                    }
+                    
+                    // Update AuthManager state
+                    if let eventId = authManager.selectedEventId {
+                        print("\nUpdating AuthManager state for event:", eventId)
+                        authManager.updateCalendarEventInState(
+                            eventId: eventId,
+                            calendarEventId: event.id.uuidString
+                        ) { calendarEvent in
+                            print("Previous times:")
+                            print("- Start:", formatTime(date: calendarEvent.startTime))
+                            print("- End:", formatTime(date: calendarEvent.endTime))
+                            
+                            if let newStartTime = updatedEvent.startTime {
+                                calendarEvent.startTime = newStartTime
+                            }
+                            if let newEndTime = updatedEvent.endTime {
+                                calendarEvent.endTime = newEndTime
                             }
                             
-                            // Force a UI refresh of the calendar view
-                            authManager.objectWillChange.send()
+                            print("Updated times:")
+                            print("- Start:", formatTime(date: calendarEvent.startTime))
+                            print("- End:", formatTime(date: calendarEvent.endTime))
                         }
                         
-                        print("\nFinal state check:")
-                        if let selectedEvent = authManager.selectedEvent {
-                            print("Selected event calendar events:")
-                            for calEvent in selectedEvent.calendarEvents {
-                                print("ID: \(calEvent.id)")
-                                print("  Start: \(formatTime(date: calEvent.startTime))")
-                                print("  End: \(formatTime(date: calEvent.endTime))")
-                            }
-                        }
-                        
-                        impactMed.impactOccurred(intensity: 0.5)
+                        print("\nTriggering UI updates")
+                        authManager.objectWillChange.send()
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("RefreshCalendarEvents"),
+                            object: nil,
+                            userInfo: [
+                                "eventId": eventId,
+                                "calendarEventId": event.id.uuidString,
+                                "startTime": updatedEvent.startTime as Any,
+                                "endTime": updatedEvent.endTime as Any
+                            ]
+                        )
                     }
-                } catch {
-                    print("\nError updating event times:", error)
-                    notificationFeedback.notificationOccurred(.error)
-                    currentStartTime = events[index].startTime
-                    currentEndTime = events[index].endTime
+                    
+                    impactMed.impactOccurred(intensity: 0.5)
                 }
+            } catch {
+                print("\nError updating event times:", error)
+                print("Error details:", (error as NSError).localizedDescription)
+                notificationFeedback.notificationOccurred(.error)
+                // Revert times on error
+                currentStartTime = event.startTime
+                currentEndTime = event.endTime
             }
         }
         print("=======================\n")
