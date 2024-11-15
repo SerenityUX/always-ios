@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		437DB18E2CE02A940019126B /* alwaysLogo.png in Resources */ = {isa = PBXBuildFile; fileRef = 437DB18D2CE02A940019126B /* alwaysLogo.png */; };
 		4391904F2CCECBDD00BC8A27 /* background.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 4391904E2CCECBDD00BC8A27 /* background.mp4 */; };
 		43983F3F2CD2D50300B84695 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43983F3E2CD2D50300B84695 /* NotificationService.swift */; };
 		43983F432CD2D50300B84695 /* OneSignalNotificationServiceExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 43983F3C2CD2D50300B84695 /* OneSignalNotificationServiceExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -57,6 +58,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		437DB18D2CE02A940019126B /* alwaysLogo.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = alwaysLogo.png; sourceTree = "<group>"; };
 		4391904E2CCECBDD00BC8A27 /* background.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = background.mp4; sourceTree = "<group>"; };
 		43983F362CD2D43F00B84695 /* hack-time.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "hack-time.entitlements"; sourceTree = "<group>"; };
 		43983F372CD2D45800B84695 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -119,6 +121,7 @@
 			isa = PBXGroup;
 			children = (
 				4391904E2CCECBDD00BC8A27 /* background.mp4 */,
+				437DB18D2CE02A940019126B /* alwaysLogo.png */,
 				43983F522CD411A400B84695 /* wipetears.gif */,
 				43F24FCD2CCB0074007A476B /* hack-time */,
 				43983F3D2CD2D50300B84695 /* OneSignalNotificationServiceExtension */,
@@ -269,6 +272,7 @@
 				4391904F2CCECBDD00BC8A27 /* background.mp4 in Resources */,
 				43983F532CD411A400B84695 /* wipetears.gif in Resources */,
 				43F24FD62CCB0075007A476B /* Preview Assets.xcassets in Resources */,
+				437DB18E2CE02A940019126B /* alwaysLogo.png in Resources */,
 				43F24FD32CCB0075007A476B /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -497,13 +501,13 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "hack-time/hack-time.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 1.2;
 				DEVELOPMENT_ASSET_PATHS = "\"hack-time/Preview Content\"";
 				DEVELOPMENT_TEAM = 2H4LMN3ZLG;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "hack-time/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Hack Mind";
+				INFOPLIST_KEY_CFBundleDisplayName = always;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -513,7 +517,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.serenidad.hack-time";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -534,13 +538,13 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "hack-time/hack-time.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 1.2;
 				DEVELOPMENT_ASSET_PATHS = "\"hack-time/Preview Content\"";
 				DEVELOPMENT_TEAM = 2H4LMN3ZLG;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "hack-time/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Hack Mind";
+				INFOPLIST_KEY_CFBundleDisplayName = always;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -550,7 +554,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.serenidad.hack-time";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";

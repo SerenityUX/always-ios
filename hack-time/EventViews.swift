@@ -322,9 +322,22 @@ struct EventPreviewView: View {
     
     private func formatEventTime(start: Date, end: Date) -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "h:mm a"
-        let startString = formatter.string(from: start).lowercased()
-        let endString = formatter.string(from: end).lowercased()
+        formatter.timeZone = TimeZone(abbreviation: "UTC")!
+        
+        let formatTime: (Date) -> String = { date in
+            var calendar = Calendar.current
+            calendar.timeZone = TimeZone(abbreviation: "UTC")!
+            let minutes = calendar.component(.minute, from: date)
+            if minutes == 0 {
+                formatter.dateFormat = "ha"  // Will show like "2pm"
+            } else {
+                formatter.dateFormat = "h:mm a"  // Will show like "2:30pm"
+            }
+            return formatter.string(from: date).lowercased()
+        }
+        
+        let startString = formatTime(start)
+        let endString = formatTime(end)
         return "\(startString) - \(endString)"
     }
     

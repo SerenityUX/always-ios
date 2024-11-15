@@ -14,18 +14,17 @@ struct OnboardingView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black
-                    .edgesIgnoringSafeArea(.all)
-                
-                LoopingVideoPlayer(videoName: "background")
+                Color(hex: "#FEE353")
                     .edgesIgnoringSafeArea(.all)
                 
                 VStack {
-                    Text("Hack Mind")
-                        .font(.system(size: 64))
-                        .foregroundColor(.white)
-                        .fontWeight(.bold)
-                        .shadow(color: Color.black.opacity(0.35), radius: 16, x: 0, y: 2)
+                    Image("alwaysLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 64)
+                        .padding(.vertical, 32)
+
                     Spacer()
                     VStack(spacing: 12){
                         Button(action: {
@@ -34,8 +33,8 @@ struct OnboardingView: View {
                             Text("Login")
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 16)
-                                .background(Color.black)
-                                .foregroundColor(.white)
+                                .background(Color(hex: "#492802"))
+                                .foregroundColor(Color(hex: "#FEE353"))
                                 .cornerRadius(16)
                                 .font(.system(size: 18))
                                 .fontWeight(.medium)
@@ -48,9 +47,13 @@ struct OnboardingView: View {
                             Text("Signup")
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 16)
-                                .background(Color.white)
-                                .foregroundColor(.black)
+                                .background(Color(hex: "#FEE353"))
+                                .foregroundColor(Color(hex: "#492802"))
                                 .cornerRadius(16)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(Color(hex: "#492802"), lineWidth: 2)
+                                )
                                 .font(.system(size: 18))
                                 .fontWeight(.medium)
                         })
@@ -150,8 +153,10 @@ struct LoginView: View {
                     if isLoading {
                         ProgressView()
                             .tint(.white)
+                            .frame(maxWidth: .infinity)
                     } else {
                         Text("Login")
+                            .frame(maxWidth: .infinity)
                     }
                 }
                 .frame(maxWidth: .infinity)

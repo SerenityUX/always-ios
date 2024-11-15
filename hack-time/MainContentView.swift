@@ -121,11 +121,13 @@ struct MainContentView: View {
                 }
             }
         default:
+            // Get the team member's email from their name
+            guard let teamMemberEmail = event.teamMembers.first(where: { $0.name == selectedTag })?.email else { return [] }
             return calendarEvents.filter { calendarEvent in
                 event.tasks.contains { task in
                     task.startTime == calendarEvent.startTime &&
                     task.endTime == calendarEvent.endTime &&
-                    task.assignedTo.contains { $0.name == selectedTag }
+                    task.assignedTo.contains { $0.email == teamMemberEmail }
                 }
             }
         }
@@ -501,7 +503,7 @@ struct MainContentView: View {
                                     .frame(height: 72.0)
                                 }
                             }
-                            .frame(minHeight: UIScreen.main.bounds.height)
+                            .frame(minHeight: UIScreen.main.bounds.height, alignment: .top)
                             
                             // Events layer (move to front)
                             if showEvents {

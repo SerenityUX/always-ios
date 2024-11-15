@@ -25,7 +25,7 @@ struct hack_timeApp: App {
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
         // Remove this method to stop OneSignal Debugging
-        OneSignal.Debug.setLogLevel(.LL_VERBOSE)
+        OneSignal.Debug.setLogLevel(.LL_ERROR) // Show only errors        
         
         // OneSignal initialization
         OneSignal.initialize(Configuration.oneSignalAppId, withLaunchOptions: launchOptions)
