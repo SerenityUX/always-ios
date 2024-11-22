@@ -91,108 +91,106 @@ struct LoginView: View {
     
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
-                Text("Welcome Back")
-                    .font(.title)
-                    .fontWeight(.bold)
-                    .padding(.top, 32)
-                
-                VStack(alignment: .leading, spacing: 20) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Email")
-                            .foregroundColor(.gray)
-                        TextField("Enter your email", text: $email)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .textContentType(.emailAddress)
-                            .keyboardType(.emailAddress)
-                            .autocapitalization(.none)
-                            .focused($focusedField, equals: .email)
-                            .submitLabel(.next)
-                            .onSubmit {
-                                focusedField = .password
+            ScrollView {
+                VStack(spacing: 24) {
+                    Text("Welcome Back")
+                        .font(.title)
+                        .fontWeight(.bold)
+                        .padding(.top, 32)
+                    
+                    VStack(alignment: .leading, spacing: 20) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Email")
+                                .foregroundColor(.gray)
+                            TextField("Enter your email", text: $email)
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                                .textContentType(.emailAddress)
+                                .keyboardType(.emailAddress)
+                                .autocapitalization(.none)
+                                .focused($focusedField, equals: .email)
+                                .submitLabel(.next)
+                                .onSubmit {
+                                    focusedField = .password
+                                }
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Password")
+                                .foregroundColor(.gray)
+                            HStack {
+                                if showPassword {
+                                    TextField("Enter your password", text: $password)
+                                        .textContentType(.password)
+                                        .submitLabel(.done)
+                                } else {
+                                    SecureField("Enter your password", text: $password)
+                                        .textContentType(.password)
+                                        .submitLabel(.done)
+                                }
+                                
+                                Button(action: {
+                                    showPassword.toggle()
+                                }) {
+                                    Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
+                                        .foregroundColor(.gray)
+                                }
                             }
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .focused($focusedField, equals: .password)
+                            .onSubmit {
+                                handleLogin()
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 24)
+                    
+                    if let error = errorMessage {
+                        Text(error)
+                            .foregroundColor(.red)
+                            .padding(.horizontal)
                     }
                     
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Password")
+                    Button(action: handleLogin) {
+                        if isLoading {
+                            ProgressView()
+                                .tint(.white)
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Text("Login")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(Color.black)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+                    .padding(.horizontal, 24)
+                    .disabled(isLoading)
+                    
+                    Button(action: {
+                        showForgotPassword = true
+                    }) {
+                        Text("Forgot Password?")
                             .foregroundColor(.gray)
-                        HStack {
-                            if showPassword {
-                                TextField("Enter your password", text: $password)
-                                    .textContentType(.password)
-                                    .submitLabel(.done)
-                            } else {
-                                SecureField("Enter your password", text: $password)
-                                    .textContentType(.password)
-                                    .submitLabel(.done)
-                            }
-                            
-                            Button(action: {
-                                showPassword.toggle()
-                            }) {
-                                Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
-                                    .foregroundColor(.gray)
-                            }
-                        }
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .focused($focusedField, equals: .password)
-                        .onSubmit {
-                            handleLogin()
-                        }
                     }
-                }
-                .padding(.horizontal, 24)
-                
-                if let error = errorMessage {
-                    Text(error)
-                        .foregroundColor(.red)
-                        .padding(.horizontal)
-                }
-                
-                Button(action: handleLogin) {
-                    if isLoading {
-                        ProgressView()
-                            .tint(.white)
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        Text("Login")
-                            .frame(maxWidth: .infinity)
+                    
+                    Spacer()
+                    
+                    HStack(spacing: 4) {
+                        Text("By logging in, you agree to our")
+                            .font(.footnote)
+                            .foregroundColor(.gray)
+                        Link("Terms and Conditions", destination: URL(string: "https://serenidad.click/hacktime/privacy-toc")!)
+                            .font(.footnote)
                     }
+                    .padding(.bottom, 16)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .background(Color.black)
-                .foregroundColor(.white)
-                .cornerRadius(12)
-                .padding(.horizontal, 24)
-                .disabled(isLoading)
-                
-                Button(action: {
-                    showForgotPassword = true
-                }) {
-                    Text("Forgot Password?")
-                        .foregroundColor(.gray)
-                }
-                
-                Spacer()
-                
-                HStack(spacing: 4) {
-                    Text("By logging in, you agree to our")
-                        .font(.footnote)
-                        .foregroundColor(.gray)
-                    Link("Terms and Conditions", destination: URL(string: "https://serenidad.click/hacktime/privacy-toc")!)
-                        .font(.footnote)
-                }
-                .padding(.bottom, 16)
             }
-        }
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                focusedField = .email
-            }
-        }
-        .sheet(isPresented: $showForgotPassword) {
-            ForgotPasswordView()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.bottom, 32)
+            .scrollDismissesKeyboard(.immediately)
+            .ignoresSafeArea(.keyboard)
         }
     }
     
@@ -247,135 +245,136 @@ struct SignupView: View {
     
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
-                Text("Create Account")
-                    .font(.title)
-                    .fontWeight(.bold)
-                    .padding(.top, 32)
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Name")
-                        .foregroundColor(.gray)
-                    TextField("Enter your name", text: $name)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .focused($focusedField, equals: .name)
-                        .submitLabel(.next)
-                        .onSubmit {
-                            focusedField = .email
-                        }
-                }
-                .padding(.horizontal, 24)
-                
-                VStack(alignment: .leading, spacing: 20) {
+            ScrollView {
+                VStack(spacing: 24) {
+                    Text("Create Account")
+                        .font(.title)
+                        .fontWeight(.bold)
+                        .padding(.top, 32)
+                    
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Email")
+                        Text("Name")
                             .foregroundColor(.gray)
-                        TextField("Enter your email", text: $email)
+                        TextField("Enter your name", text: $name)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .textContentType(.emailAddress)
-                            .keyboardType(.emailAddress)
-                            .autocapitalization(.none)
-                            .focused($focusedField, equals: .email)
+                            .focused($focusedField, equals: .name)
                             .submitLabel(.next)
                             .onSubmit {
-                                focusedField = .password
+                                focusedField = .email
                             }
+                    }
+                    .padding(.horizontal, 24)
+                    
+                    VStack(alignment: .leading, spacing: 20) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Email")
+                                .foregroundColor(.gray)
+                            TextField("Enter your email", text: $email)
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                                .textContentType(.emailAddress)
+                                .keyboardType(.emailAddress)
+                                .autocapitalization(.none)
+                                .focused($focusedField, equals: .email)
+                                .submitLabel(.next)
+                                .onSubmit {
+                                    focusedField = .password
+                                }
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Password")
+                                .foregroundColor(.gray)
+                            HStack {
+                                if showPassword {
+                                    TextField("Enter your password", text: $password)
+                                        .textContentType(.password)
+                                } else {
+                                    SecureField("Enter your password", text: $password)
+                                        .textContentType(.password)
+                                }
+                                
+                                Button(action: {
+                                    showPassword.toggle()
+                                }) {
+                                    Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
+                                        .foregroundColor(.gray)
+                                }
+                            }
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .focused($focusedField, equals: .password)
+                            .submitLabel(.next)
+                            .onSubmit {
+                                focusedField = .confirmPassword
+                            }
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Confirm Password")
+                                .foregroundColor(.gray)
+                            HStack {
+                                if showConfirmPassword {
+                                    TextField("Confirm your password", text: $confirmPassword)
+                                        .textContentType(.password)
+                                } else {
+                                    SecureField("Confirm your password", text: $confirmPassword)
+                                        .textContentType(.password)
+                                }
+                                
+                                Button(action: {
+                                    showConfirmPassword.toggle()
+                                }) {
+                                    Image(systemName: showConfirmPassword ? "eye.slash.fill" : "eye.fill")
+                                        .foregroundColor(.gray)
+                                }
+                            }
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .focused($focusedField, equals: .confirmPassword)
+                            .submitLabel(.join)
+                            .onSubmit {
+                                handleSignup()
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 24)
+                    
+                    if let error = errorMessage {
+                        Text(error)
+                            .foregroundColor(.red)
+                            .padding(.horizontal)
                     }
                     
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Password")
-                            .foregroundColor(.gray)
-                        HStack {
-                            if showPassword {
-                                TextField("Enter your password", text: $password)
-                                    .textContentType(.password)
-                            } else {
-                                SecureField("Enter your password", text: $password)
-                                    .textContentType(.password)
-                            }
-                            
-                            Button(action: {
-                                showPassword.toggle()
-                            }) {
-                                Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
-                                    .foregroundColor(.gray)
-                            }
-                        }
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .focused($focusedField, equals: .password)
-                        .submitLabel(.next)
-                        .onSubmit {
-                            focusedField = .confirmPassword
+                    Button(action: handleSignup) {
+                        if isLoading {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Text("Sign Up")
                         }
                     }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(Color.black)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+                    .padding(.horizontal, 24)
+                    .disabled(isLoading)
                     
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Confirm Password")
+                    Spacer()
+                    
+                    HStack(spacing: 4) {
+                        Text("By signing up, you agree to our")
+                            .font(.footnote)
                             .foregroundColor(.gray)
-                        HStack {
-                            if showConfirmPassword {
-                                TextField("Confirm your password", text: $confirmPassword)
-                                    .textContentType(.password)
-                            } else {
-                                SecureField("Confirm your password", text: $confirmPassword)
-                                    .textContentType(.password)
-                            }
-                            
-                            Button(action: {
-                                showConfirmPassword.toggle()
-                            }) {
-                                Image(systemName: showConfirmPassword ? "eye.slash.fill" : "eye.fill")
-                                    .foregroundColor(.gray)
-                            }
-                        }
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .focused($focusedField, equals: .confirmPassword)
-                        .submitLabel(.join)
-                        .onSubmit {
-                            handleSignup()
-                        }
+                        Link("Terms and Conditions", destination: URL(string: "https://serenidad.click/hacktime/privacy-toc")!)
+                            .font(.footnote)
                     }
+                    .padding(.bottom, 16)
                 }
-                .padding(.horizontal, 24)
-                
-                if let error = errorMessage {
-                    Text(error)
-                        .foregroundColor(.red)
-                        .padding(.horizontal)
-                }
-                
-                Button(action: handleSignup) {
-                    if isLoading {
-                        ProgressView()
-                            .tint(.white)
-                    } else {
-                        Text("Sign Up")
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .background(Color.black)
-                .foregroundColor(.white)
-                .cornerRadius(12)
-                .padding(.horizontal, 24)
-                .disabled(isLoading)
-                
-                Spacer()
-                
-                HStack(spacing: 4) {
-                    Text("By signing up, you agree to our")
-                        .font(.footnote)
-                        .foregroundColor(.gray)
-                    Link("Terms and Conditions", destination: URL(string: "https://serenidad.click/hacktime/privacy-toc")!)
-                        .font(.footnote)
-                }
-                .padding(.bottom, 16)
             }
-        }
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                focusedField = .email
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.bottom, 32)
+            .scrollDismissesKeyboard(.immediately)
+            .ignoresSafeArea(.keyboard)
         }
     }
     
@@ -435,123 +434,123 @@ struct ForgotPasswordView: View {
     
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
-                Text(codeSent ? "Reset Password" : "Forgot Password")
-                    .font(.title)
-                    .fontWeight(.bold)
-                    .padding(.top, 32)
-                
-                if !codeSent {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Email")
-                            .foregroundColor(.gray)
-                        TextField("Enter your email", text: $email)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .textContentType(.emailAddress)
-                            .keyboardType(.emailAddress)
-                            .autocapitalization(.none)
-                            .focused($focusedField, equals: .email)
-                            .submitLabel(.done)
-                    }
-                    .padding(.horizontal, 24)
-                } else {
-                    VStack(spacing: 20) {
+            ScrollView {
+                VStack(spacing: 24) {
+                    Text(codeSent ? "Reset Password" : "Forgot Password")
+                        .font(.title)
+                        .fontWeight(.bold)
+                        .padding(.top, 32)
+                    
+                    if !codeSent {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Code")
+                            Text("Email")
                                 .foregroundColor(.gray)
-                            TextField("Enter the code sent to your email", text: $oneTimeCode)
+                            TextField("Enter your email", text: $email)
                                 .textFieldStyle(RoundedBorderTextFieldStyle())
-                                .keyboardType(.numberPad)
-                                .focused($focusedField, equals: .code)
+                                .textContentType(.emailAddress)
+                                .keyboardType(.emailAddress)
+                                .autocapitalization(.none)
+                                .focused($focusedField, equals: .email)
+                                .submitLabel(.done)
+                        }
+                        .padding(.horizontal, 24)
+                    } else {
+                        VStack(spacing: 20) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Code")
+                                    .foregroundColor(.gray)
+                                TextField("Enter the code sent to your email", text: $oneTimeCode)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                    .keyboardType(.numberPad)
+                                    .focused($focusedField, equals: .code)
+                                    .submitLabel(.next)
+                                    .onSubmit {
+                                        focusedField = .password
+                                    }
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("New Password")
+                                    .foregroundColor(.gray)
+                                HStack {
+                                    if showPassword {
+                                        TextField("Enter new password", text: $newPassword)
+                                    } else {
+                                        SecureField("Enter new password", text: $newPassword)
+                                    }
+                                    
+                                    Button(action: {
+                                        showPassword.toggle()
+                                    }) {
+                                        Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
+                                            .foregroundColor(.gray)
+                                    }
+                                }
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                                .focused($focusedField, equals: .password)
                                 .submitLabel(.next)
                                 .onSubmit {
-                                    focusedField = .password
+                                    focusedField = .confirmPassword
                                 }
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Confirm Password")
+                                    .foregroundColor(.gray)
+                                HStack {
+                                    if showPassword {
+                                        TextField("Confirm new password", text: $confirmPassword)
+                                    } else {
+                                        SecureField("Confirm new password", text: $confirmPassword)
+                                    }
+                                    
+                                    Button(action: {
+                                        showPassword.toggle()
+                                    }) {
+                                        Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
+                                            .foregroundColor(.gray)
+                                    }
+                                }
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                                .focused($focusedField, equals: .confirmPassword)
+                                .submitLabel(.done)
+                                .onSubmit {
+                                    handlePasswordReset()
+                                }
+                            }
                         }
-                        
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("New Password")
-                                .foregroundColor(.gray)
-                            HStack {
-                                if showPassword {
-                                    TextField("Enter new password", text: $newPassword)
-                                } else {
-                                    SecureField("Enter new password", text: $newPassword)
-                                }
-                                
-                                Button(action: {
-                                    showPassword.toggle()
-                                }) {
-                                    Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
-                                        .foregroundColor(.gray)
-                                }
-                            }
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .focused($focusedField, equals: .password)
-                            .submitLabel(.next)
-                            .onSubmit {
-                                focusedField = .confirmPassword
-                            }
-                        }
-                        
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Confirm Password")
-                                .foregroundColor(.gray)
-                            HStack {
-                                if showPassword {
-                                    TextField("Confirm new password", text: $confirmPassword)
-                                } else {
-                                    SecureField("Confirm new password", text: $confirmPassword)
-                                }
-                                
-                                Button(action: {
-                                    showPassword.toggle()
-                                }) {
-                                    Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
-                                        .foregroundColor(.gray)
-                                }
-                            }
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .focused($focusedField, equals: .confirmPassword)
-                            .submitLabel(.done)
-                            .onSubmit {
-                                handlePasswordReset()
-                            }
+                        .padding(.horizontal, 24)
+                    }
+                    
+                    if let error = errorMessage {
+                        Text(error)
+                            .foregroundColor(.red)
+                            .padding(.horizontal)
+                    }
+                    
+                    Button(action: codeSent ? handlePasswordReset : handleCodeRequest) {
+                        if isLoading {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Text(codeSent ? "Reset Password" : "Send Code")
                         }
                     }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(Color.black)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
                     .padding(.horizontal, 24)
+                    .disabled(isLoading)
+                    
+                    Spacer()
                 }
-                
-                if let error = errorMessage {
-                    Text(error)
-                        .foregroundColor(.red)
-                        .padding(.horizontal)
-                }
-                
-                Button(action: codeSent ? handlePasswordReset : handleCodeRequest) {
-                    if isLoading {
-                        ProgressView()
-                            .tint(.white)
-                    } else {
-                        Text(codeSent ? "Reset Password" : "Send Code")
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .background(Color.black)
-                .foregroundColor(.white)
-                .cornerRadius(12)
-                .padding(.horizontal, 24)
-                .disabled(isLoading)
-                
-                Spacer()
             }
-            .navigationBarItems(leading: Button("Cancel") {
-                dismiss()
-            })
-        }
-        .onAppear {
-            focusedField = .email
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.bottom, 32)
+            .scrollDismissesKeyboard(.immediately)
+            .ignoresSafeArea(.keyboard)
         }
     }
     

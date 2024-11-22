@@ -23,6 +23,8 @@ struct EventView: View {
 
     @State private var currentTitle: String
 
+    @StateObject private var timelineConfig = TimelineConfiguration.shared
+
     init(event: CalendarEvent, dayStartTime: Date, events: Binding<[CalendarEvent]>, isNewEvent: Bool = false) {
         self.event = event
         self.dayStartTime = dayStartTime
@@ -116,7 +118,7 @@ struct EventView: View {
         let components = calendar.dateComponents([.hour, .minute], from: event.startTime, to: event.endTime)
         let hours = CGFloat(components.hour ?? 0)
         let minutes = CGFloat(components.minute ?? 0)
-        return (hours + minutes / 60) * 72.0 - 16
+        return (hours + minutes / 60) * timelineConfig.blockHeight - 16
     }
 
     private func updateEventTitle() {
@@ -188,13 +190,12 @@ struct EventView: View {
     }
 
     private func snapToNearestHour(offset: CGFloat) -> CGFloat {
-        let hourHeight: CGFloat = 72.0
-        return round(offset / hourHeight) * hourHeight
+        return round(offset / timelineConfig.blockHeight) * timelineConfig.blockHeight
     }
 
     private func wouldOverlap(with offset: CGFloat) -> Bool {
-        let newStartTime = Calendar.current.date(byAdding: .minute, value: Int(offset / 72.0 * 60), to: event.startTime)!
-        let newEndTime = Calendar.current.date(byAdding: .minute, value: Int(offset / 72.0 * 60), to: event.endTime)!
+        let newStartTime = Calendar.current.date(byAdding: .minute, value: Int(offset / timelineConfig.blockHeight * 60), to: event.startTime)!
+        let newEndTime = Calendar.current.date(byAdding: .minute, value: Int(offset / timelineConfig.blockHeight * 60), to: event.endTime)!
 
         return events.contains { otherEvent in
             guard otherEvent.id != event.id else { return false }
@@ -219,7 +220,7 @@ struct EventView: View {
         print("- Drag Offset:", dragOffset)
         
         if let index = events.firstIndex(where: { $0.id == event.id }) {
-            let minutesToAdd = Int(dragOffset / 72.0 * 60)
+            let minutesToAdd = Int(dragOffset / timelineConfig.blockHeight * 60)
             let newStartTime = Calendar.current.date(byAdding: .minute, value: minutesToAdd, to: event.startTime)!
             let newEndTime = Calendar.current.date(byAdding: .minute, value: minutesToAdd, to: event.endTime)!
             
@@ -332,6 +333,8 @@ struct EventPreviewView: View {
     let endTime: Date
     let dayStartTime: Date
     
+    @StateObject private var timelineConfig = TimelineConfiguration.shared
+    
     var body: some View {
         VStack(alignment: .leading) {
             HStack {
@@ -380,7 +383,7 @@ struct EventPreviewView: View {
         let components = calendar.dateComponents([.hour, .minute], from: startTime, to: endTime)
         let hours = CGFloat(components.hour ?? 0)
         let minutes = CGFloat(components.minute ?? 0)
-        return (hours + minutes / 60) * 72.0 - 16
+        return (hours + minutes / 60) * timelineConfig.blockHeight - 16
     }
 }
 
@@ -412,6 +415,8 @@ struct EventDetailModalView: View {
     }
     
     @EnvironmentObject var authManager: AuthManager
+
+    @StateObject private var timelineConfig = TimelineConfiguration.shared
 
     init(event: CalendarEvent, events: Binding<[CalendarEvent]>) {
         self.event = event

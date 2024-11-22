@@ -7,6 +7,10 @@
 
 import SwiftUI
 
+private let TIMELINE_BLOCK_HEIGHT: CGFloat = 96.0  // Increase from 72 to 96 (or your preferred size)
+
+
+
 struct NoEventsView: View {
     @EnvironmentObject var authManager: AuthManager
     @State private var showCreateEventModal = false
@@ -208,6 +212,10 @@ struct MainContentView: View {
     @FocusState private var isTaskTitleFocused: Bool
     
     @State private var showInviteModal = false
+    
+    @StateObject private var timelineConfig = TimelineConfiguration.shared
+    
+    @State private var initialBlockHeight: CGFloat?
     
     init(initialEvents: [CalendarEvent] = []) {
         var calendar = Calendar.current
@@ -500,7 +508,7 @@ struct MainContentView: View {
                                         }
                                         Spacer()
                                     }
-                                    .frame(height: 72.0)
+                                    .frame(height: timelineConfig.blockHeight)
                                 }
                             }
                             .frame(minHeight: UIScreen.main.bounds.height, alignment: .top)
@@ -552,6 +560,38 @@ struct MainContentView: View {
                                     .offset(y: calculateEventOffset(for: CalendarEvent(title: "", startTime: start, endTime: end, color: .clear)))
                                     .zIndex(2)
                             }
+                        }
+                        .gesture(
+                            MagnificationGesture()
+                                .onChanged { value in
+                                    if let initialHeight = initialBlockHeight {
+                                        withAnimation(.interactiveSpring(response: 0.3, dampingFraction: 0.8, blendDuration: 0)) {
+                                            timelineConfig.updateHeight(
+                                                scale: value,
+                                                initialHeight: initialHeight
+                                            )
+                                        }
+                                    } else {
+                                        initialBlockHeight = timelineConfig.blockHeight
+                                    }
+                                }
+                                .onEnded { _ in
+                                    initialBlockHeight = nil
+                                }
+                        )
+                    }
+                    .animation(.interactiveSpring(), value: timelineConfig.blockHeight)
+                    .overlay(alignment: .top) {
+                        if timelineConfig.isZooming {
+                            Text("\(Int(timelineConfig.blockHeight))px")
+                                .font(.caption)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.black.opacity(0.75))
+                                .foregroundColor(.white)
+                                .cornerRadius(8)
+                                .padding(.top, 8)
+                                .transition(.opacity)
                         }
                     }
                     .refreshable {
@@ -649,7 +689,7 @@ struct MainContentView: View {
             if let event = authManager.selectedEvent {
                 startTime = event.startTime
                 endTime = event.endTime
-                timelinePoints = hoursBetween(start: startTime, end: endTime)
+                timelinePoints = hoursBetween(start: event.startTime, end: event.endTime)
             }
         }
         .overlay(
@@ -795,7 +835,7 @@ struct MainContentView: View {
             let point = TimelinePoint(date: currentDate, yPosition: yPosition)
             points.append(point)
             currentDate = calendar.date(byAdding: .hour, value: 1, to: currentDate)!
-            yPosition += 72.0
+            yPosition += timelineConfig.blockHeight
         }
         
         return points
@@ -810,12 +850,12 @@ struct MainContentView: View {
     }
     
     private func calculateEventOffset(for event: CalendarEvent) -> CGFloat {
-        var calendar = Calendar(identifier: .gregorian)
+        var calendar = Calendar.current
         calendar.timeZone = TimeZone(abbreviation: "UTC")!
         let components = calendar.dateComponents([.hour, .minute], from: startTime, to: event.startTime)
         let hours = CGFloat(components.hour ?? 0)
         let minutes = CGFloat(components.minute ?? 0)
-        return (hours + minutes / 60) * 72.0
+        return (hours + minutes / 60) * timelineConfig.blockHeight
     }
     
     private func createCalendarEvent(start: Date, end: Date) {
@@ -936,7 +976,7 @@ struct MainContentView: View {
         let roundedStartTime = calendar.date(from: components) ?? startTime
         
         let hoursDifference = calendar.dateComponents([.hour], from: self.startTime, to: roundedStartTime).hour ?? 0
-        return CGFloat(hoursDifference) * 72.0
+        return CGFloat(hoursDifference) * timelineConfig.blockHeight
     }
 
     private func createTask(eventId: String, startTime: Date, endTime: Date, assignee: String) {
@@ -1018,6 +1058,7 @@ struct MainContentView: View {
         let tags: [String]
         let task: EventTask
         let startTime: Date
+        let timelineConfig: TimelineConfiguration
         
         func body(content: Content) -> some View {
             content
@@ -1035,7 +1076,7 @@ struct MainContentView: View {
             let components = calendar.dateComponents([.year, .month, .day, .hour], from: task.startTime)
             let roundedStartTime = calendar.date(from: components) ?? task.startTime
             let hoursDifference = calendar.dateComponents([.hour], from: startTime, to: roundedStartTime).hour ?? 0
-            return CGFloat(hoursDifference) * 72.0
+            return CGFloat(hoursDifference) * timelineConfig.blockHeight
         }
         
         private func calculateHorizontalOffset() -> CGFloat {
@@ -1076,7 +1117,8 @@ struct MainContentView: View {
             taskOffset: taskOffset,
             tags: tags,
             task: task,
-            startTime: startTime
+            startTime: startTime,
+            timelineConfig: timelineConfig
         ))
         .onChange(of: isTaskTitleFocused) { focused in
             if !focused && editingTaskId == task.id {
@@ -1176,7 +1218,7 @@ struct InitialsView: View {
     }
 }
 
-// Update TaskTimelineView to use UTC time
+// Update TaskTimelineView to include missing properties
 struct TaskTimelineView: View {
     let task: EventTask
     let dayStartTime: Date
@@ -1185,6 +1227,7 @@ struct TaskTimelineView: View {
     @FocusState var isTitleFocused: Bool
     let onTitleTap: () -> Void
     let onTitleSubmit: () -> Void
+    @StateObject private var timelineConfig = TimelineConfiguration.shared
     @State private var showTaskDetail = false
     @EnvironmentObject var authManager: AuthManager
     
@@ -1209,8 +1252,8 @@ struct TaskTimelineView: View {
     }
     
     private var height: CGFloat {
-        let minHeight: CGFloat = 72.0 // Minimum one hour
-        let calculatedHeight = CGFloat(duration / 3600.0) * 72.0 - 16
+        let minHeight: CGFloat = timelineConfig.blockHeight
+        let calculatedHeight = CGFloat(duration / 3600.0) * timelineConfig.blockHeight - 16
         return max(minHeight - 16, calculatedHeight)
     }
     
@@ -1351,6 +1394,7 @@ struct TaskTimelineView: View {
 struct TaskPreviewView: View {
     let startTime: Date
     let endTime: Date
+    @StateObject private var timelineConfig = TimelineConfiguration.shared
     
     var body: some View {
         VStack(alignment: .leading) {
@@ -1392,7 +1436,7 @@ struct TaskPreviewView: View {
         let components = calendar.dateComponents([.hour, .minute], from: startTime, to: endTime)
         let hours = CGFloat(components.hour ?? 0)
         let minutes = CGFloat(components.minute ?? 0)
-        return (hours + minutes / 60) * 72.0 - 16
+        return (hours + minutes / 60) * timelineConfig.blockHeight - 16
     }
 }
 
@@ -2159,4 +2203,29 @@ struct GIFImageView: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: UIImageView, context: Context) {}
+} 
+
+// Update the TimelineSettingsView to use the proper update method
+struct TimelineSettingsView: View {
+    @StateObject private var timelineConfig = TimelineConfiguration.shared
+    
+    var body: some View {
+        VStack {
+            Text("Timeline Block Height: \(Int(timelineConfig.blockHeight))")
+            Slider(
+                value: Binding(
+                    get: { timelineConfig.blockHeight },
+                    set: { newValue in
+                        timelineConfig.updateHeight(
+                            scale: newValue / TimelineConfiguration.defaultHeight,
+                            initialHeight: TimelineConfiguration.defaultHeight
+                        )
+                    }
+                ),
+                in: TimelineConfiguration.minBlockHeight...TimelineConfiguration.maxBlockHeight,
+                step: TimelineConfiguration.incrementSize
+            )
+        }
+        .padding()
+    }
 } 

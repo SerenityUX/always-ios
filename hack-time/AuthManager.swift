@@ -202,7 +202,7 @@ class AuthManager: ObservableObject {
         // Then set the new external user ID using login
         OneSignal.login(email)
         
-        print("Set OneSignal external user ID to:", email)
+        // print("Set OneSignal external user ID to:", email)
     }
 
     func login(email: String, password: String) async throws -> String {
@@ -299,10 +299,6 @@ class AuthManager: ObservableObject {
             throw AuthError.serverError
         }
         
-        if let jsonString = String(data: data, encoding: .utf8) {
-            print("Raw JSON response:", jsonString)
-        }
-        
         let decoder = createDecoder()
         let user = try decoder.decode(User.self, from: data)
         await MainActor.run {
@@ -383,15 +379,8 @@ class AuthManager: ObservableObject {
         )
         
         request.httpBody = try encoder.encode(requestBody)
-        if let jsonString = String(data: request.httpBody!, encoding: .utf8) {
-            print("Request body:", jsonString)
-        }
         
         let (data, response) = try await URLSession.shared.data(for: request)
-        
-        if let jsonString = String(data: data, encoding: .utf8) {
-            print("Response data:", jsonString)
-        }
         
         guard let httpResponse = response as? HTTPURLResponse else {
             throw AuthError.invalidResponse
@@ -417,19 +406,9 @@ class AuthManager: ObservableObject {
     }
     
     func updateCalendarEvent(calendarEventId: String, title: String?, startTime: Date?, endTime: Date?, color: String?) async throws -> PartialCalendarEventResponse {
-        print("\n=== AuthManager: Update Calendar Event ===")
-        print("Request Details:")
-        print("Calendar Event ID:", calendarEventId)
-        print("New Title:", title ?? "nil")
-        print("New Start Time:", startTime.map { formatDate($0) } ?? "nil")
-        print("New End Time:", endTime.map { formatDate($0) } ?? "nil")
-        print("New Color:", color ?? "nil")
-        
         guard let token = UserDefaults.standard.string(forKey: "authToken") else {
-            print("Error: No auth token found")
             throw AuthError.invalidToken
         }
-        print("Auth token found:", token.prefix(10) + "...")
         
         let url = URL(string: "\(baseURL)/updateCalendarEvent")!
         var request = URLRequest(url: url)
@@ -444,44 +423,26 @@ class AuthManager: ObservableObject {
         
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         
-        print("\nRequest body:", String(data: request.httpBody!, encoding: .utf8) ?? "")
-        
-        print("\nSending request to:", url.absoluteString)
         let (data, response) = try await URLSession.shared.data(for: request)
         
-        // Log the raw response
-        print("\nResponse received:")
-        print("Raw response data:", String(data: data, encoding: .utf8) ?? "")
-        
         guard let httpResponse = response as? HTTPURLResponse else {
-            print("Error: Invalid response type")
             throw AuthError.invalidResponse
         }
-        
-        print("\nResponse status code:", httpResponse.statusCode)
-        print("Response headers:", httpResponse.allHeaderFields)
         
         guard httpResponse.statusCode == 200 else {
             if let errorJson = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
                 print("Server error:", errorJson.error)
             }
-            print("Error: Non-200 status code received")
             throw AuthError.serverError
         }
         
         do {
-            let decoder = createDecoder()
-            print("\nAttempting to decode response...")
+        let decoder = createDecoder()
             let response = try decoder.decode(PartialCalendarEventResponse.self, from: data)
-            print("Successfully decoded response:")
-            print("- Start Time:", response.startTime.map { formatDate($0) } ?? "nil")
-            print("- End Time:", response.endTime.map { formatDate($0) } ?? "nil")
-            print("- Title:", response.title ?? "nil")
-            print("- Color:", response.color ?? "nil")
+
             return response
         } catch {
-            print("\nDecoding error:", error)
-            print("Decoding error details:", (error as? DecodingError).map { "\($0)" } ?? "Unknown error")
+
             throw error
         }
     }
@@ -696,18 +657,12 @@ class AuthManager: ObservableObject {
     }
 
     func refreshCalendarEvents() {
-        print("\n=== Refreshing Calendar Events ===")
         objectWillChange.send()
         
-        // Re-assign currentUser to force state update
         if let user = currentUser {
             currentUser = user
-            
-            // Notify any listening views that they should update
             NotificationCenter.default.post(name: NSNotification.Name("RefreshCalendarEvents"), object: nil)
         }
-        print("Calendar events refreshed")
-        print("===========================\n")
     }
 
     func updateCalendarEventInState(eventId: String, calendarEventId: String, updates: (inout APICalendarEvent) -> Void) {
